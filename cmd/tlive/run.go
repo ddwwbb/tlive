@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"net"
@@ -112,14 +114,16 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	}()
 
 	// Start HTTP server with embedded web assets
-	srv := server.New(store, hubs, "")
+	token := generateToken()
+	srv := server.New(store, hubs, token)
 	srv.SetResizeFunc(sess.ID, func(rows, cols uint16) {
 		proc.Resize(rows, cols)
 	})
 	srv.SetWebFS(web.Assets)
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 
-	fmt.Fprintf(os.Stderr, "\n  TermLive Web UI: http://%s:%d\n", localIP, cfg.Server.Port)
+	url := fmt.Sprintf("http://%s:%d?token=%s", localIP, cfg.Server.Port, token)
+	fmt.Fprintf(os.Stderr, "\n  TermLive Web UI: %s\n", url)
 	fmt.Fprintf(os.Stderr, "  Session: %s (ID: %s)\n\n", sess.Command, sess.ID)
 
 	httpServer := &http.Server{Addr: addr, Handler: srv.Handler()}
@@ -165,4 +169,10 @@ func getLocalIP() string {
 		}
 	}
 	return "127.0.0.1"
+}
+
+func generateToken() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	return hex.EncodeToString(b)
 }

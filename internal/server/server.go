@@ -43,5 +43,29 @@ func (s *Server) Handler() http.Handler {
 	if s.webFS != nil {
 		mux.Handle("/", http.FileServer(http.FS(s.webFS)))
 	}
+	if s.token != "" {
+		return s.authMiddleware(mux)
+	}
 	return mux
+}
+
+func (s *Server) authMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token := r.URL.Query().Get("token")
+		if token == "" {
+			if cookie, err := r.Cookie("tl_token"); err == nil {
+				token = cookie.Value
+			}
+		}
+		if token != s.token {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		http.SetCookie(w, &http.Cookie{
+			Name:  "tl_token",
+			Value: s.token,
+			Path:  "/",
+		})
+		next.ServeHTTP(w, r)
+	})
 }

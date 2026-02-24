@@ -20,11 +20,17 @@ func (w *WeChatNotifier) Send(msg *NotifyMessage) error {
 	if w.webhookURL == "" {
 		return nil
 	}
+	var title string
+	if msg.Confidence == "high" {
+		title = fmt.Sprintf("**TermLive: 终端等待输入 (空闲 %ds)**", msg.IdleSeconds)
+	} else {
+		title = fmt.Sprintf("**TermLive: 终端已空闲 %ds（可能仍在处理中）**", msg.IdleSeconds)
+	}
 	content := fmt.Sprintf(
-		"**TermLive: 终端等待输入 (空闲 %ds)**\n\n"+
+		"%s\n\n"+
 			"> 会话: %s (PID: %d)\n> 运行时长: %s\n\n"+
 			"最近输出:\n```\n%s\n```\n\n[打开 Web 终端](%s)",
-		msg.IdleSeconds, msg.Command, msg.Pid, msg.Duration, msg.LastOutput, msg.WebURL,
+		title, msg.Command, msg.Pid, msg.Duration, msg.LastOutput, msg.WebURL,
 	)
 	payload := map[string]interface{}{
 		"msgtype":  "markdown",

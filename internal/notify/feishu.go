@@ -20,15 +20,24 @@ func (f *FeishuNotifier) Send(msg *NotifyMessage) error {
 	if f.webhookURL == "" {
 		return nil
 	}
+	var headerTitle string
+	var headerTemplate string
+	if msg.Confidence == "high" {
+		headerTitle = fmt.Sprintf("TermLive: 终端等待输入 (空闲 %ds)", msg.IdleSeconds)
+		headerTemplate = "red"
+	} else {
+		headerTitle = fmt.Sprintf("TermLive: 终端已空闲 %ds（可能仍在处理中）", msg.IdleSeconds)
+		headerTemplate = "orange"
+	}
 	card := map[string]interface{}{
 		"msg_type": "interactive",
 		"card": map[string]interface{}{
 			"header": map[string]interface{}{
 				"title": map[string]string{
 					"tag":     "plain_text",
-					"content": fmt.Sprintf("TermLive: 终端等待输入 (空闲 %ds)", msg.IdleSeconds),
+					"content": headerTitle,
 				},
-				"template": "orange",
+				"template": headerTemplate,
 			},
 			"elements": []interface{}{
 				map[string]interface{}{

@@ -8,6 +8,7 @@ type NotifyMessage struct {
 	LastOutput  string
 	WebURL      string
 	IdleSeconds int
+	Confidence  string // "high" or "low"
 }
 
 type Notifier interface {

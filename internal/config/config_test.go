@@ -117,3 +117,58 @@ processing = ["^\\s*\\d+%", "ETA\\s+\\d"]
 		t.Errorf("unexpected processing[1]: %s", cfg.Notify.Patterns.Processing[1])
 	}
 }
+
+func TestLoadFromFile_WithDaemonConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".termlive.toml")
+	content := `
+[daemon]
+port = 9090
+token = "my-token"
+
+[notify]
+channels = ["web", "wechat"]
+short_timeout = 15
+
+[notify.options]
+include_context = false
+history_limit = 50
+
+[notify.wechat]
+webhook_url = "https://example.com/hook"
+`
+	os.WriteFile(path, []byte(content), 0644)
+
+	cfg, err := LoadFromFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Daemon.Port != 9090 {
+		t.Fatalf("expected daemon port 9090, got %d", cfg.Daemon.Port)
+	}
+	if cfg.Daemon.Token != "my-token" {
+		t.Fatalf("expected token 'my-token', got %q", cfg.Daemon.Token)
+	}
+	if len(cfg.Notify.Channels) != 2 {
+		t.Fatalf("expected 2 channels, got %d", len(cfg.Notify.Channels))
+	}
+	if cfg.Notify.Options.HistoryLimit != 50 {
+		t.Fatalf("expected history_limit 50, got %d", cfg.Notify.Options.HistoryLimit)
+	}
+	if cfg.Notify.Options.IncludeContext != false {
+		t.Fatal("expected include_context false")
+	}
+}
+
+func TestDefault_HasSaneDefaults(t *testing.T) {
+	cfg := Default()
+	if cfg.Daemon.Port != 8080 {
+		t.Fatalf("expected default daemon port 8080, got %d", cfg.Daemon.Port)
+	}
+	if cfg.Notify.Options.HistoryLimit != 100 {
+		t.Fatalf("expected default history_limit 100, got %d", cfg.Notify.Options.HistoryLimit)
+	}
+	if cfg.Notify.Options.IncludeContext != true {
+		t.Fatal("expected default include_context true")
+	}
+}

@@ -7,26 +7,21 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	port         int
-	shortTimeout int
-	longTimeout  int
-	publicIP     string
-)
+var port int
 
 var rootCmd = &cobra.Command{
-	Use:   "tlive [command] [args...]",
-	Short: "TermLive - Terminal live streaming tool",
-	Long:  "Wrap terminal commands for remote monitoring and interaction via Web UI.",
-	Args:  cobra.MinimumNArgs(1),
-	RunE:  runCommand,
+	Use:   "tlive",
+	Short: "TermLive - Terminal live monitoring with AI notifications",
+	Long: `TermLive wraps terminal commands for remote monitoring, interaction,
+and intelligent notifications via AI tool integration (skills/hooks).`,
 }
 
 func init() {
-	rootCmd.Flags().IntVarP(&port, "port", "p", 8080, "Web server port")
-	rootCmd.Flags().IntVarP(&shortTimeout, "short-timeout", "s", 30, "Short idle timeout for detected prompts (seconds)")
-	rootCmd.Flags().IntVarP(&longTimeout, "long-timeout", "l", 120, "Long idle timeout for unknown idle (seconds)")
-	rootCmd.Flags().StringVar(&publicIP, "ip", "", "Override auto-detected LAN IP address")
+	rootCmd.PersistentFlags().IntVarP(&port, "port", "p", 8080, "Web server / daemon port")
+	rootCmd.AddCommand(initCmd)
+	rootCmd.AddCommand(runCmd)
+	rootCmd.AddCommand(notifyCmd)
+	rootCmd.AddCommand(daemonCmd)
 }
 
 func main() {

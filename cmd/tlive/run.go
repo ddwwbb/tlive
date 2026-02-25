@@ -24,6 +24,26 @@ import (
 	"golang.org/x/term"
 )
 
+var (
+	shortTimeout int
+	longTimeout  int
+	publicIP     string
+)
+
+var runCmd = &cobra.Command{
+	Use:   "run <command> [args...]",
+	Short: "Run a command with PTY wrapping and Web UI (full mode)",
+	Long:  "Start a command inside a PTY with remote Web UI, notifications, and idle detection.",
+	Args:  cobra.MinimumNArgs(1),
+	RunE:  runCommand,
+}
+
+func init() {
+	runCmd.Flags().IntVarP(&shortTimeout, "short-timeout", "s", 30, "Short idle timeout for detected prompts (seconds)")
+	runCmd.Flags().IntVarP(&longTimeout, "long-timeout", "l", 120, "Long idle timeout for unknown idle (seconds)")
+	runCmd.Flags().StringVar(&publicIP, "ip", "", "Override auto-detected LAN IP address")
+}
+
 // localOutputClient implements hub.Client to write PTY output to local
 // stdout and feed the idle detector. It is registered on the session hub
 // so that the SessionManager's output goroutine delivers data here.

@@ -17,9 +17,16 @@ type ServerConfig struct {
 }
 
 type NotifyConfig struct {
-	IdleTimeout int          `toml:"idle_timeout"`
-	WeChat      WeChatConfig `toml:"wechat"`
-	Feishu      FeishuConfig `toml:"feishu"`
+	ShortTimeout int           `toml:"short_timeout"` // seconds, for awaiting-input (default 30)
+	LongTimeout  int           `toml:"long_timeout"`  // seconds, for unknown idle (default 120)
+	Patterns     PatternConfig `toml:"patterns"`
+	WeChat       WeChatConfig  `toml:"wechat"`
+	Feishu       FeishuConfig  `toml:"feishu"`
+}
+
+type PatternConfig struct {
+	AwaitingInput []string `toml:"awaiting_input"`
+	Processing    []string `toml:"processing"`
 }
 
 type WeChatConfig struct {
@@ -33,7 +40,10 @@ type FeishuConfig struct {
 func Default() *Config {
 	return &Config{
 		Server: ServerConfig{Port: 8080, Host: "0.0.0.0"},
-		Notify: NotifyConfig{IdleTimeout: 30},
+		Notify: NotifyConfig{
+			ShortTimeout: 30,
+			LongTimeout:  120,
+		},
 	}
 }
 

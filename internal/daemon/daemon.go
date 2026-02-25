@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/termlive/termlive/internal/notify"
 )
 
 // DaemonConfig holds configuration for the daemon HTTP server.
@@ -27,6 +29,7 @@ type Daemon struct {
 	cfg           DaemonConfig
 	mgr           *SessionManager
 	notifications *NotificationStore
+	notifier      *notify.MultiNotifier
 	token         string
 	startTime     time.Time
 	server        *http.Server
@@ -62,6 +65,11 @@ func (d *Daemon) Token() string { return d.token }
 
 // Notifications returns the notification store (for direct internal use).
 func (d *Daemon) Notifications() *NotificationStore { return d.notifications }
+
+// SetNotifiers configures external notification channels (WeChat, Feishu, etc.).
+func (d *Daemon) SetNotifiers(n *notify.MultiNotifier) {
+	d.notifier = n
+}
 
 // --- HTTP API types ---
 
@@ -145,6 +153,22 @@ func (d *Daemon) handleNotify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	n := d.notifications.Add(req.Type, req.Message, req.Context)
+
+	// Relay to external notification channels
+	if d.notifier != nil {
+		relayMsg := &notify.NotifyMessage{
+			Command:    string(req.Type),
+			LastOutput: req.Message,
+			Confidence: "high",
+		}
+		if req.Context != "" {
+			relayMsg.LastOutput = req.Message + "\n\n" + req.Context
+		}
+		if err := d.notifier.Send(relayMsg); err != nil {
+			log.Printf("notification relay error: %v", err)
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(NotifyResponse{
 		ID:        n.ID,

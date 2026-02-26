@@ -1,23 +1,27 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/gorilla/websocket"
+	qrterminal "github.com/mdp/qrterminal/v3"
 	"github.com/spf13/cobra"
 	"github.com/termlive/termlive/internal/config"
 	"github.com/termlive/termlive/internal/daemon"
 	"github.com/termlive/termlive/internal/notify"
 	"github.com/termlive/termlive/internal/server"
 	"github.com/termlive/termlive/web"
-
-	qrterminal "github.com/mdp/qrterminal/v3"
 	"golang.org/x/term"
 )
 
@@ -58,35 +62,50 @@ func (c *localOutputClient) Send(data []byte) error {
 }
 
 func runCommand(cmd *cobra.Command, args []string) error {
-	// Load config
 	cfg := config.Default()
 	cfg.Server.Port = port
 	cfg.Notify.ShortTimeout = shortTimeout
 	cfg.Notify.LongTimeout = longTimeout
 
-	// Detect terminal size
 	rows, cols := uint16(24), uint16(80)
 	if w, h, err := term.GetSize(int(os.Stdout.Fd())); err == nil {
 		cols, rows = uint16(w), uint16(h)
 	}
 
-	// Create daemon (replaces standalone SessionManager + HTTP server)
+	lockPath := daemon.DefaultLockPath()
+
+	// --- Determine host vs client mode ---
+	isHost := true
+	lock, err := daemon.ReadLockFile(lockPath)
+	if err == nil && daemonHealthCheck(lock.Port, lock.Token) {
+		isHost = false
+	}
+
+	if isHost {
+		return runHost(cfg, args, rows, cols, lockPath)
+	}
+	return runClient(lock, args, rows, cols)
+}
+
+// runHost starts an embedded daemon (first process) and runs the command
+// directly via the in-process SessionManager.
+func runHost(cfg *config.Config, args []string, rows, cols uint16, lockPath string) error {
+	// Create daemon
 	d := daemon.NewDaemon(daemon.DaemonConfig{
 		Port:         cfg.Server.Port,
 		HistoryLimit: cfg.Notify.Options.HistoryLimit,
 	})
 	mgr := d.Manager()
 
+	// Create session directly (in-process, no HTTP)
 	ms, err := mgr.CreateSession(args[0], args[1:], daemon.SessionConfig{
-		Rows: rows,
-		Cols: cols,
+		Rows: rows, Cols: cols,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to start command: %w", err)
 	}
 	defer mgr.StopSession(ms.Session.ID)
 
-	// Master shutdown context — cancelled on any exit path
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -141,6 +160,32 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	ms.Hub.Register(localClient)
 	defer ms.Hub.Unregister(localClient)
 
+	// Setup Web UI server as extra handler on the daemon.
+	srv := server.New(mgr)
+	mgr.SetResizeFunc(ms.Session.ID, func(r, c uint16) {
+		ms.Proc.Resize(r, c)
+	})
+	srv.SetWebFS(web.Assets)
+	d.SetExtraHandler(srv.Handler())
+
+	// Write lock file BEFORE starting listener so clients can discover us
+	daemon.WriteLockFile(lockPath, daemon.LockInfo{
+		Port:  cfg.Server.Port,
+		Token: d.Token(),
+		Pid:   os.Getpid(),
+	})
+	defer daemon.RemoveLockFile(lockPath)
+
+	// Print connection info
+	url := fmt.Sprintf("http://%s:%d?token=%s", localIP, cfg.Server.Port, d.Token())
+	localURL := fmt.Sprintf("http://localhost:%d?token=%s", cfg.Server.Port, d.Token())
+	fmt.Fprintf(os.Stderr, "\n  TermLive Web UI:\n")
+	fmt.Fprintf(os.Stderr, "    Local:   %s\n", localURL)
+	fmt.Fprintf(os.Stderr, "    Network: %s\n", url)
+	fmt.Fprintf(os.Stderr, "  Session: %s (ID: %s)\n\n", ms.Session.Command, ms.Session.ID)
+	qrterminal.GenerateHalfBlock(url, qrterminal.L, os.Stderr)
+	fmt.Fprintln(os.Stderr)
+
 	// Set terminal to raw mode for proper input pass-through
 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
 	rawMode := err == nil
@@ -164,27 +209,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	// Setup Web UI server as extra handler on the daemon.
-	// Pass empty token so the server skips its own auth middleware —
-	// the daemon's auth middleware already covers all routes.
-	srv := server.New(mgr)
-	mgr.SetResizeFunc(ms.Session.ID, func(rows, cols uint16) {
-		ms.Proc.Resize(rows, cols)
-	})
-	srv.SetWebFS(web.Assets)
-	d.SetExtraHandler(srv.Handler())
-
-	// Print connection info
-	url := fmt.Sprintf("http://%s:%d?token=%s", localIP, cfg.Server.Port, d.Token())
-	localURL := fmt.Sprintf("http://localhost:%d?token=%s", cfg.Server.Port, d.Token())
-	fmt.Fprintf(os.Stderr, "\n  TermLive Web UI:\n")
-	fmt.Fprintf(os.Stderr, "    Local:   %s\n", localURL)
-	fmt.Fprintf(os.Stderr, "    Network: %s\n", url)
-	fmt.Fprintf(os.Stderr, "  Session: %s (ID: %s)\n\n", ms.Session.Command, ms.Session.ID)
-	qrterminal.GenerateHalfBlock(url, qrterminal.L, os.Stderr)
-	fmt.Fprintln(os.Stderr)
-
-	// Start daemon in goroutine (replaces httpServer.ListenAndServe)
+	// Start daemon in goroutine
 	go d.Run()
 
 	// Wait for process exit or signal
@@ -202,8 +227,6 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "\n  Process exited with code %d\n", exitCode)
 	case sig := <-sigCh:
 		fmt.Fprintf(os.Stderr, "\n  Received signal: %v\n", sig)
-		// Kill process tree — don't call Close() here; the deferred
-		// StopSession handles Kill + Close + Hub cleanup properly.
 		ms.Proc.Kill()
 		exitCode = 130
 	}
@@ -219,12 +242,187 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	// Stop idle detector
 	idleDetector.Stop()
 
-	// StopSession (hub + PTY + session status) is handled by defer
+	// Check for remaining sessions (from client mode processes).
+	// StopSession is deferred, so other sessions from clients may still be active.
+	// We need to wait for them before shutting down the daemon.
+	if mgr.ActiveCount() > 1 { // >1 because our session hasn't been stopped yet (deferred)
+		fmt.Fprintf(os.Stderr, "  Daemon still serving %d other session(s). Press Ctrl+C to stop.\n", mgr.ActiveCount()-1)
+		signal.Reset(syscall.SIGINT, syscall.SIGTERM)
+		sigCh2 := make(chan os.Signal, 1)
+		signal.Notify(sigCh2, syscall.SIGINT, syscall.SIGTERM)
+		<-sigCh2
+		fmt.Fprintf(os.Stderr, "  Shutting down daemon...\n")
+	}
 
-	// Graceful daemon shutdown (replaces httpServer.Shutdown)
+	// deferred: mgr.StopSession, RemoveLockFile
 	d.Stop()
 
+	_ = exitCode
 	return nil
+}
+
+// runClient connects to an already-running daemon and creates a new session
+// via HTTP API, then relays I/O over WebSocket.
+func runClient(lock daemon.LockInfo, args []string, rows, cols uint16) error {
+	// Create session via HTTP API
+	sessionID, err := createSessionViaAPI(lock.Port, lock.Token, args[0], args[1:], rows, cols)
+	if err != nil {
+		return fmt.Errorf("failed to create session: %w", err)
+	}
+	defer deleteSessionViaAPI(lock.Port, lock.Token, sessionID)
+
+	fmt.Fprintf(os.Stderr, "\n  TermLive (client mode):\n")
+	fmt.Fprintf(os.Stderr, "    Daemon:  http://localhost:%d\n", lock.Port)
+	fmt.Fprintf(os.Stderr, "    Session: %s (ID: %s)\n\n", args[0], sessionID)
+
+	// Set terminal to raw mode
+	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+	rawMode := err == nil
+	defer func() {
+		if rawMode {
+			term.Restore(int(os.Stdin.Fd()), oldState)
+		}
+	}()
+
+	// Connect WebSocket
+	wsURL := fmt.Sprintf("ws://localhost:%d/ws/%s", lock.Port, sessionID)
+	header := http.Header{}
+	header.Set("Cookie", fmt.Sprintf("tl_token=%s", lock.Token))
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, header)
+	if err != nil {
+		if rawMode {
+			term.Restore(int(os.Stdin.Fd()), oldState)
+		}
+		return fmt.Errorf("websocket connect: %w", err)
+	}
+	defer conn.Close()
+
+	// Send initial resize
+	resizeMsg, _ := json.Marshal(map[string]interface{}{
+		"type": "resize",
+		"rows": rows,
+		"cols": cols,
+	})
+	conn.WriteMessage(websocket.TextMessage, resizeMsg)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Signal handling
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		select {
+		case <-sigCh:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+
+	// WS -> stdout
+	go func() {
+		for {
+			_, msg, err := conn.ReadMessage()
+			if err != nil {
+				cancel()
+				return
+			}
+			os.Stdout.Write(msg)
+		}
+	}()
+
+	// stdin -> WS
+	go func() {
+		buf := make([]byte, 1024)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			n, err := os.Stdin.Read(buf)
+			if n > 0 {
+				conn.WriteMessage(websocket.BinaryMessage, buf[:n])
+			}
+			if err != nil {
+				cancel()
+				return
+			}
+		}
+	}()
+
+	// Wait for context cancellation (from WS close, signal, or stdin error)
+	<-ctx.Done()
+
+	fmt.Fprintf(os.Stderr, "\n  Session ended.\n")
+	return nil
+}
+
+// --- Helper functions ---
+
+// daemonHealthCheck pings the daemon status endpoint to verify it is alive.
+func daemonHealthCheck(port int, token string) bool {
+	client := &http.Client{Timeout: 2 * time.Second}
+	url := fmt.Sprintf("http://localhost:%d/api/status", port)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
+}
+
+// createSessionViaAPI creates a new session on the remote daemon via HTTP POST.
+func createSessionViaAPI(port int, token string, command string, args []string, rows, cols uint16) (string, error) {
+	reqBody := daemon.CreateSessionRequest{
+		Command: command,
+		Args:    args,
+		Rows:    rows,
+		Cols:    cols,
+	}
+	data, _ := json.Marshal(reqBody)
+	url := fmt.Sprintf("http://localhost:%d/api/sessions", port)
+	req, err := http.NewRequest("POST", url, bytes.NewReader(data))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, body)
+	}
+	var result daemon.CreateSessionResponse
+	json.NewDecoder(resp.Body).Decode(&result)
+	return result.ID, nil
+}
+
+// deleteSessionViaAPI deletes a session on the remote daemon via HTTP DELETE.
+func deleteSessionViaAPI(port int, token string, sessionID string) {
+	url := fmt.Sprintf("http://localhost:%d/api/sessions/%s", port, sessionID)
+	req, err := http.NewRequest("DELETE", url, nil)
+	if err != nil {
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return
+	}
+	resp.Body.Close()
 }
 
 // isPrivateIP reports whether ip is an RFC 1918 private address

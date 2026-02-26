@@ -3,21 +3,21 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/termlive/termlive/internal/hub"
+	"github.com/termlive/termlive/internal/daemon"
 	"github.com/termlive/termlive/internal/session"
 )
 
 func TestSessionListAPI(t *testing.T) {
-	store := session.NewStore()
+	mgr := daemon.NewSessionManager()
 	s := session.New("echo", []string{"hello"})
-	store.Add(s)
-	h := hub.New()
-	srv := New(store, map[string]*hub.Hub{s.ID: h}, "")
+	mgr.Store().Add(s)
+	srv := New(mgr)
 	req := httptest.NewRequest("GET", "/api/sessions", nil)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, req)
@@ -30,24 +30,35 @@ func TestSessionListAPI(t *testing.T) {
 	}
 }
 
+func testCommand() (string, []string) {
+	if runtime.GOOS == "windows" {
+		return "cmd.exe", []string{"/C", "echo hello"}
+	}
+	return "echo", []string{"hello"}
+}
+
 func TestWebSocketConnection(t *testing.T) {
-	store := session.NewStore()
-	s := session.New("test", nil)
-	store.Add(s)
-	h := hub.New()
-	go h.Run()
-	defer h.Stop()
-	srv := New(store, map[string]*hub.Hub{s.ID: h}, "")
+	mgr := daemon.NewSessionManager()
+	cmd, args := testCommand()
+	ms, err := mgr.CreateSession(cmd, args, daemon.SessionConfig{Rows: 24, Cols: 80})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.StopSession(ms.Session.ID)
+
+	srv := New(mgr)
 	server := httptest.NewServer(srv.Handler())
 	defer server.Close()
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws/" + s.ID
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws/" + ms.Session.ID
 	ws, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer ws.Close()
-	h.Broadcast([]byte("hello from pty"))
-	ws.SetReadDeadline(time.Now().Add(time.Second))
+
+	ms.Hub.Broadcast([]byte("hello from pty"))
+	ws.SetReadDeadline(time.Now().Add(2 * time.Second))
 	_, msg, err := ws.ReadMessage()
 	if err != nil {
 		t.Fatal(err)

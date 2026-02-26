@@ -167,8 +167,8 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	// Setup Web UI server as extra handler on the daemon.
 	// Pass empty token so the server skips its own auth middleware —
 	// the daemon's auth middleware already covers all routes.
-	srv := server.New(mgr.Store(), mgr.Hubs(), "")
-	srv.SetResizeFunc(ms.Session.ID, func(rows, cols uint16) {
+	srv := server.New(mgr)
+	mgr.SetResizeFunc(ms.Session.ID, func(rows, cols uint16) {
 		ms.Proc.Resize(rows, cols)
 	})
 	srv.SetWebFS(web.Assets)
@@ -202,7 +202,9 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "\n  Process exited with code %d\n", exitCode)
 	case sig := <-sigCh:
 		fmt.Fprintf(os.Stderr, "\n  Received signal: %v\n", sig)
-		ms.Proc.Close()
+		// Kill process tree — don't call Close() here; the deferred
+		// StopSession handles Kill + Close + Hub cleanup properly.
+		ms.Proc.Kill()
 		exitCode = 130
 	}
 

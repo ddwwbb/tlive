@@ -7,8 +7,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/termlive/termlive/internal/hub"
-	"github.com/termlive/termlive/internal/session"
+	"github.com/termlive/termlive/internal/daemon"
 )
 
 type sessionInfo struct {
@@ -20,9 +19,9 @@ type sessionInfo struct {
 	LastOutput string `json:"last_output"`
 }
 
-func handleSessionList(store *session.Store) http.HandlerFunc {
+func handleSessionList(mgr *daemon.SessionManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		sessions := store.List()
+		sessions := mgr.Store().List()
 		infos := make([]sessionInfo, len(sessions))
 		for i, s := range sessions {
 			infos[i] = sessionInfo{
@@ -50,12 +49,12 @@ type wsControlMessage struct {
 	Cols uint16 `json:"cols"`
 }
 
-func handleWebSocket(hubs map[string]*hub.Hub, resizeFuncs map[string]ResizeFunc) http.HandlerFunc {
+func handleWebSocket(mgr *daemon.SessionManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/ws/"), "/")
 		sessionID := parts[0]
-		h, ok := hubs[sessionID]
-		if !ok {
+		h := mgr.Hub(sessionID)
+		if h == nil {
 			http.Error(w, "session not found", http.StatusNotFound)
 			return
 		}
@@ -76,10 +75,8 @@ func handleWebSocket(hubs map[string]*hub.Hub, resizeFuncs map[string]ResizeFunc
 			}
 			var ctrl wsControlMessage
 			if json.Unmarshal(msg, &ctrl) == nil && ctrl.Type == "resize" {
-				if resizeFuncs != nil {
-					if resizeFn, ok := resizeFuncs[sessionID]; ok {
-						resizeFn(ctrl.Rows, ctrl.Cols)
-					}
+				if fn := mgr.ResizeFunc(sessionID); fn != nil {
+					fn(ctrl.Rows, ctrl.Cols)
 				}
 				continue
 			}

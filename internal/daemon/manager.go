@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"sync"
+	"time"
 
 	"github.com/termlive/termlive/internal/hub"
 	"github.com/termlive/termlive/internal/pty"
@@ -26,6 +27,7 @@ type ManagedSession struct {
 	Proc     pty.Process
 	done     chan struct{}
 	exitCode int
+	resizeFn func(rows, cols uint16)
 }
 
 // ExitCode blocks until the managed process exits and returns its exit code.
@@ -148,7 +150,9 @@ func (m *SessionManager) Hubs() map[string]*hub.Hub {
 	return result
 }
 
-// StopSession closes the PTY, stops the hub, and marks the session as stopped.
+// StopSession kills the process tree, releases PTY resources, stops the hub,
+// and marks the session as stopped. Safe to call multiple times for the same ID
+// (second call returns an error but causes no harm).
 func (m *SessionManager) StopSession(id string) error {
 	m.mu.Lock()
 	ms, ok := m.managed[id]
@@ -159,16 +163,67 @@ func (m *SessionManager) StopSession(id string) error {
 	delete(m.managed, id)
 	m.mu.Unlock()
 
-	// Close PTY process
+	// 1. Kill the entire process tree (children included) to prevent
+	//    orphaned processes from holding ConPTY/conhost resources.
+	if err := ms.Proc.Kill(); err != nil {
+		log.Printf("warning: kill process tree for session %s: %v", id, err)
+	}
+
+	// 2. Wait briefly for the process to actually exit so that handles
+	//    are safe to close. The Wait goroutine closes ms.done on exit.
+	select {
+	case <-ms.done:
+		// Process exited cleanly.
+	case <-time.After(3 * time.Second):
+		log.Printf("warning: process for session %s did not exit within 3s", id)
+	}
+
+	// 3. Close PTY handles (idempotent).
 	if err := ms.Proc.Close(); err != nil {
 		log.Printf("warning: closing PTY for session %s: %v", id, err)
 	}
 
-	// Stop the hub event loop
+	// 4. Stop the hub event loop.
 	ms.Hub.Stop()
 
-	// Mark session as stopped
+	// 5. Mark session as stopped.
 	ms.Session.Status = session.StatusStopped
 
 	return nil
+}
+
+// SetResizeFunc registers a resize callback for a session.
+func (m *SessionManager) SetResizeFunc(id string, fn func(rows, cols uint16)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if ms, ok := m.managed[id]; ok {
+		ms.resizeFn = fn
+	}
+}
+
+// ResizeFunc returns the resize callback for a session.
+func (m *SessionManager) ResizeFunc(id string) func(rows, cols uint16) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if ms, ok := m.managed[id]; ok {
+		return ms.resizeFn
+	}
+	return nil
+}
+
+// Hub returns the hub for a specific session.
+func (m *SessionManager) Hub(id string) *hub.Hub {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if ms, ok := m.managed[id]; ok {
+		return ms.Hub
+	}
+	return nil
+}
+
+// ActiveCount returns the number of active (running) managed sessions.
+func (m *SessionManager) ActiveCount() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.managed)
 }

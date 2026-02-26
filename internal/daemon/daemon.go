@@ -108,6 +108,28 @@ type StatusResponse struct {
 	Sessions int    `json:"sessions"`
 }
 
+// --- Session management API types ---
+
+// CreateSessionRequest is the JSON body for POST /api/sessions.
+type CreateSessionRequest struct {
+	Command string   `json:"command"`
+	Args    []string `json:"args"`
+	Rows    uint16   `json:"rows"`
+	Cols    uint16   `json:"cols"`
+}
+
+// CreateSessionResponse is the JSON response for POST /api/sessions.
+type CreateSessionResponse struct {
+	ID      string `json:"id"`
+	Command string `json:"command"`
+	Pid     int    `json:"pid"`
+}
+
+// DeleteSessionResponse is the JSON response for DELETE /api/sessions/{id}.
+type DeleteSessionResponse struct {
+	OK bool `json:"ok"`
+}
+
 // Handler returns the HTTP handler for the daemon API.
 // Separated from Run() so it can be tested with httptest.
 func (d *Daemon) Handler() http.Handler {
@@ -115,6 +137,8 @@ func (d *Daemon) Handler() http.Handler {
 	mux.HandleFunc("/api/notify", d.handleNotify)
 	mux.HandleFunc("/api/notifications", d.handleNotifications)
 	mux.HandleFunc("/api/status", d.handleStatus)
+	mux.HandleFunc("/api/sessions/", d.handleDeleteSession)
+	mux.HandleFunc("/api/sessions", d.handleCreateSession)
 	if d.extraHandler != nil {
 		mux.Handle("/", d.extraHandler)
 	}
@@ -219,6 +243,61 @@ func (d *Daemon) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Port:     d.cfg.Port,
 		Sessions: len(sessions),
 	})
+}
+
+func (d *Daemon) handleCreateSession(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req CreateSessionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.Command == "" {
+		http.Error(w, "command is required", http.StatusBadRequest)
+		return
+	}
+	if req.Rows == 0 {
+		req.Rows = 24
+	}
+	if req.Cols == 0 {
+		req.Cols = 80
+	}
+
+	ms, err := d.mgr.CreateSession(req.Command, req.Args, SessionConfig{
+		Rows: req.Rows, Cols: req.Cols,
+	})
+	if err != nil {
+		http.Error(w, "failed to create session: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(CreateSessionResponse{
+		ID:      ms.Session.ID,
+		Command: ms.Session.Command,
+		Pid:     ms.Session.Pid,
+	})
+}
+
+func (d *Daemon) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
+	if id == "" {
+		http.Error(w, "session ID required", http.StatusBadRequest)
+		return
+	}
+	if err := d.mgr.StopSession(id); err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(DeleteSessionResponse{OK: true})
 }
 
 // --- Auth middleware ---

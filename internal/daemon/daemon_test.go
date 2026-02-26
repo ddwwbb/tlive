@@ -77,3 +77,49 @@ func TestDaemon_StatusEndpoint(t *testing.T) {
 		t.Fatalf("expected status 'running', got %q", resp.Status)
 	}
 }
+
+func TestDaemon_CreateSessionEndpoint(t *testing.T) {
+	d := NewDaemon(DaemonConfig{Port: 0, Token: "test-token"})
+	handler := d.Handler()
+
+	body := `{"command":"echo","args":["hello"],"rows":24,"cols":80}`
+	req := httptest.NewRequest("POST", "/api/sessions", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp CreateSessionResponse
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp.ID == "" {
+		t.Fatal("expected non-empty session ID")
+	}
+	if resp.Command != "echo" {
+		t.Errorf("expected command 'echo', got %q", resp.Command)
+	}
+}
+
+func TestDaemon_DeleteSessionEndpoint(t *testing.T) {
+	d := NewDaemon(DaemonConfig{Port: 0, Token: "test-token"})
+	handler := d.Handler()
+
+	// Create a session first
+	body := `{"command":"echo","args":["hello"],"rows":24,"cols":80}`
+	req := httptest.NewRequest("POST", "/api/sessions", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-token")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	var created CreateSessionResponse
+	json.NewDecoder(w.Body).Decode(&created)
+
+	// Delete it
+	req = httptest.NewRequest("DELETE", "/api/sessions/"+created.ID, nil)
+	req.Header.Set("Authorization", "Bearer test-token")
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}

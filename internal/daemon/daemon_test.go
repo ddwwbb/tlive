@@ -147,3 +147,33 @@ func TestDaemon_DeleteSessionEndpoint(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 }
+
+func TestDaemon_ListSessionsEndpoint(t *testing.T) {
+	d := NewDaemon(DaemonConfig{Port: 0, Token: "test-token"})
+	handler := d.Handler()
+
+	// Create a session
+	body := `{"command":"echo","args":["hello"],"rows":24,"cols":80}`
+	req := httptest.NewRequest("POST", "/api/sessions", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-token")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	var created CreateSessionResponse
+	json.NewDecoder(w.Body).Decode(&created)
+
+	// List sessions via GET
+	req = httptest.NewRequest("GET", "/api/sessions", nil)
+	req.Header.Set("Authorization", "Bearer test-token")
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	respBody := w.Body.String()
+	if !strings.Contains(respBody, created.ID) {
+		t.Errorf("expected session ID %q in list response, got: %s", created.ID, respBody)
+	}
+	if !strings.Contains(respBody, "echo") {
+		t.Errorf("expected command 'echo' in list response, got: %s", respBody)
+	}
+}

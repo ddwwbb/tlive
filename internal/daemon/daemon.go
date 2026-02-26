@@ -138,7 +138,7 @@ func (d *Daemon) Handler() http.Handler {
 	mux.HandleFunc("/api/notifications", d.handleNotifications)
 	mux.HandleFunc("/api/status", d.handleStatus)
 	mux.HandleFunc("/api/sessions/", d.handleDeleteSession)
-	mux.HandleFunc("/api/sessions", d.handleCreateSession)
+	mux.HandleFunc("/api/sessions", d.handleSessions)
 	if d.extraHandler != nil {
 		mux.Handle("/", d.extraHandler)
 	}
@@ -245,11 +245,43 @@ func (d *Daemon) handleStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (d *Daemon) handleCreateSession(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
+func (d *Daemon) handleSessions(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		d.handleListSessions(w, r)
+	case http.MethodPost:
+		d.handleCreateSession(w, r)
+	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
 	}
+}
+
+func (d *Daemon) handleListSessions(w http.ResponseWriter, r *http.Request) {
+	sessions := d.mgr.Store().List()
+	type sessionInfo struct {
+		ID         string `json:"id"`
+		Command    string `json:"command"`
+		Pid        int    `json:"pid"`
+		Status     string `json:"status"`
+		Duration   string `json:"duration"`
+		LastOutput string `json:"last_output"`
+	}
+	infos := make([]sessionInfo, len(sessions))
+	for i, s := range sessions {
+		infos[i] = sessionInfo{
+			ID:         s.ID,
+			Command:    s.Command,
+			Pid:        s.Pid,
+			Status:     string(s.Status),
+			Duration:   s.Duration().Truncate(time.Second).String(),
+			LastOutput: string(s.LastOutput(200)),
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(infos)
+}
+
+func (d *Daemon) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	var req CreateSessionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)

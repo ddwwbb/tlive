@@ -1,7 +1,6 @@
 package server
 
 import (
-	"net/http"
 	"net/http/httptest"
 	"runtime"
 	"strings"
@@ -10,25 +9,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/termlive/termlive/internal/daemon"
-	"github.com/termlive/termlive/internal/session"
 )
-
-func TestSessionListAPI(t *testing.T) {
-	mgr := daemon.NewSessionManager()
-	s := session.New("echo", []string{"hello"})
-	mgr.Store().Add(s)
-	srv := New(mgr)
-	req := httptest.NewRequest("GET", "/api/sessions", nil)
-	w := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", w.Code)
-	}
-	body := w.Body.String()
-	if !strings.Contains(body, s.ID) {
-		t.Errorf("expected session ID in response, got: %s", body)
-	}
-}
 
 func testCommand() (string, []string) {
 	if runtime.GOOS == "windows" {

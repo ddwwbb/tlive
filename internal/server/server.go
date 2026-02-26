@@ -22,7 +22,6 @@ func (s *Server) SetWebFS(webFS fs.FS) {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/sessions", handleSessionList(s.mgr))
 	mux.HandleFunc("/ws/", handleWebSocket(s.mgr))
 	if s.webFS != nil {
 		mux.Handle("/", http.FileServer(http.FS(s.webFS)))

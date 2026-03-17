@@ -1,5 +1,5 @@
 // Self-registration imports — uncomment as adapters are created
-// import './telegram.js';   // Task 23
+import './telegram.js';   // Task 23
 // import './discord.js';    // Task 24
 // import './feishu.js';     // Task 25
 

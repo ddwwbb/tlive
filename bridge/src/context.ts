@@ -1,5 +1,6 @@
-export interface BridgeStore {}
-export interface LLMProvider {}
+export type { BridgeStore } from './store/interface.js';
+export type { LLMProvider } from './providers/base.js';
+
 export interface PermissionGateway {}
 export interface CoreClient {}
 
@@ -7,6 +8,9 @@ export interface LifecycleHooks {
   onBridgeStart?(): Promise<void>;
   onBridgeStop?(): Promise<void>;
 }
+
+import type { BridgeStore } from './store/interface.js';
+import type { LLMProvider } from './providers/base.js';
 
 export interface BridgeContext {
   store: BridgeStore;

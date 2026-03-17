@@ -126,6 +126,63 @@ func TestDaemon_ListSessionsEndpoint(t *testing.T) {
 	}
 }
 
+func TestExpandedStatus(t *testing.T) {
+	d := NewDaemon(DaemonConfig{Port: 9090, Token: "tok"})
+
+	// Register a bridge
+	if err := d.bridge.Register("1.0.0", "0.1.0", []string{"chat", "tools"}); err != nil {
+		t.Fatalf("bridge.Register: %v", err)
+	}
+
+	// Add some stats
+	d.stats.Add(100, 200, 0.005)
+
+	handler := d.Handler()
+
+	req := httptest.NewRequest("GET", "/api/status", nil)
+	req.Header.Set("Authorization", "Bearer tok")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp StatusResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	// Check active_sessions field
+	if resp.ActiveSessions != 0 {
+		t.Errorf("expected active_sessions=0, got %d", resp.ActiveSessions)
+	}
+
+	// Check bridge object
+	if !resp.Bridge.Connected {
+		t.Error("expected bridge.connected=true")
+	}
+	if len(resp.Bridge.Channels) != 2 {
+		t.Errorf("expected bridge.channels len=2, got %d", len(resp.Bridge.Channels))
+	}
+
+	// Check stats object
+	if resp.Stats.InputTokens != 100 {
+		t.Errorf("expected stats.input_tokens=100, got %d", resp.Stats.InputTokens)
+	}
+	if resp.Stats.OutputTokens != 200 {
+		t.Errorf("expected stats.output_tokens=200, got %d", resp.Stats.OutputTokens)
+	}
+	if resp.Stats.CostUSD != 0.005 {
+		t.Errorf("expected stats.cost_usd=0.005, got %f", resp.Stats.CostUSD)
+	}
+
+	// Check version field
+	if resp.Version != "0.1.0" {
+		t.Errorf("expected version='0.1.0', got %q", resp.Version)
+	}
+}
+
 func TestStripANSI(t *testing.T) {
 	tests := []struct {
 		name  string

@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/termlive/termlive/core/internal/session"
 )
 
 // DaemonConfig holds configuration for the daemon HTTP server.
@@ -81,10 +83,14 @@ func (d *Daemon) SetExtraHandler(h http.Handler) {
 
 // StatusResponse is the JSON response for GET /api/status.
 type StatusResponse struct {
-	Status   string `json:"status"`
-	Uptime   string `json:"uptime"`
-	Port     int    `json:"port"`
-	Sessions int    `json:"sessions"`
+	Status         string        `json:"status"`
+	Uptime         string        `json:"uptime"`
+	Port           int           `json:"port"`
+	Sessions       int           `json:"sessions"`
+	ActiveSessions int           `json:"active_sessions"`
+	Bridge         BridgeInfo    `json:"bridge"`
+	Stats          StatsResponse `json:"stats"`
+	Version        string        `json:"version"`
 }
 
 // --- Session management API types ---
@@ -162,12 +168,22 @@ func (d *Daemon) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sessions := d.mgr.ListSessions()
+	activeSessions := 0
+	for _, s := range sessions {
+		if s.Status == session.StatusRunning {
+			activeSessions++
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(StatusResponse{
-		Status:   "running",
-		Uptime:   time.Since(d.startTime).Truncate(time.Second).String(),
-		Port:     d.cfg.Port,
-		Sessions: len(sessions),
+		Status:         "running",
+		Uptime:         time.Since(d.startTime).Truncate(time.Second).String(),
+		Port:           d.cfg.Port,
+		Sessions:       len(sessions),
+		ActiveSessions: activeSessions,
+		Bridge:         d.bridge.Status(),
+		Stats:          d.stats.Get(),
+		Version:        "0.1.0",
 	})
 }
 

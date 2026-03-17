@@ -118,6 +118,7 @@ func (d *Daemon) Handler() http.Handler {
 	mux.HandleFunc("/api/bridge/heartbeat", d.handleBridgeHeartbeat)
 	mux.HandleFunc("/api/bridge/status", d.handleBridgeStatus)
 	mux.HandleFunc("/api/stats", d.handleStats)
+	mux.HandleFunc("/api/git/status", d.handleGitStatus)
 	if d.extraHandler != nil {
 		mux.Handle("/", d.extraHandler)
 	}

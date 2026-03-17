@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/gorilla/websocket"
-	"github.com/termlive/termlive/internal/daemon"
+	"github.com/termlive/termlive/core/internal/daemon"
 )
 
 var upgrader = websocket.Upgrader{

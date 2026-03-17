@@ -4,7 +4,7 @@ import (
 	"io/fs"
 	"net/http"
 
-	"github.com/termlive/termlive/internal/daemon"
+	"github.com/termlive/termlive/core/internal/daemon"
 )
 
 type Server struct {

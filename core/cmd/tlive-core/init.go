@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/termlive/termlive/internal/generator"
+	"github.com/termlive/termlive/core/internal/generator"
 )
 
 var (

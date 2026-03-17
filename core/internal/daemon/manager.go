@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/termlive/termlive/internal/hub"
-	"github.com/termlive/termlive/internal/pty"
-	"github.com/termlive/termlive/internal/session"
+	"github.com/termlive/termlive/core/internal/hub"
+	"github.com/termlive/termlive/core/internal/pty"
+	"github.com/termlive/termlive/core/internal/session"
 )
 
 // SessionConfig holds configuration for creating a new managed session.

@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/termlive/termlive/internal/config"
-	"github.com/termlive/termlive/internal/daemon"
+	"github.com/termlive/termlive/core/internal/config"
+	"github.com/termlive/termlive/core/internal/daemon"
 )
 
 var (

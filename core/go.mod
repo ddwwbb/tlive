@@ -1,4 +1,4 @@
-module github.com/termlive/termlive
+module github.com/termlive/termlive/core
 
 go 1.24.0
 

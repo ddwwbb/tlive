@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/termlive/termlive/internal/session"
+	"github.com/termlive/termlive/core/internal/session"
 )
 
 func testCommand() (string, []string) {

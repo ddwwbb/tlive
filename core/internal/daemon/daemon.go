@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/termlive/termlive/internal/notify"
+	"github.com/termlive/termlive/core/internal/notify"
 )
 
 // DaemonConfig holds configuration for the daemon HTTP server.

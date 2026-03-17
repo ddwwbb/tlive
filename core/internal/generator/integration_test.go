@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/termlive/termlive/internal/config"
-	"github.com/termlive/termlive/internal/daemon"
+	"github.com/termlive/termlive/core/internal/config"
+	"github.com/termlive/termlive/core/internal/daemon"
 )
 
 func TestIntegration_InitThenNotify(t *testing.T) {

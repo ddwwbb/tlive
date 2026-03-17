@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/termlive/termlive/internal/daemon"
+	"github.com/termlive/termlive/core/internal/daemon"
 )
 
 func testCommand() (string, []string) {

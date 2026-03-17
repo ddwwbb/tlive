@@ -8,11 +8,11 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
-	"github.com/termlive/termlive/internal/config"
-	"github.com/termlive/termlive/internal/daemon"
-	"github.com/termlive/termlive/internal/notify"
-	"github.com/termlive/termlive/internal/server"
-	"github.com/termlive/termlive/web"
+	"github.com/termlive/termlive/core/internal/config"
+	"github.com/termlive/termlive/core/internal/daemon"
+	"github.com/termlive/termlive/core/internal/notify"
+	"github.com/termlive/termlive/core/internal/server"
+	"github.com/termlive/termlive/core/web"
 )
 
 var daemonCmd = &cobra.Command{

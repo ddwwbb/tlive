@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/termlive/termlive/internal/notify"
+	"github.com/termlive/termlive/core/internal/notify"
 )
 
 type mockNotifier struct {

@@ -27,6 +27,7 @@ type Daemon struct {
 	cfg           DaemonConfig
 	mgr           *SessionManager
 	notifications *NotificationStore
+	bridge        *BridgeManager
 	token         string
 	startTime     time.Time
 	server        *http.Server
@@ -50,6 +51,7 @@ func NewDaemon(cfg DaemonConfig) *Daemon {
 		cfg:           cfg,
 		mgr:           NewSessionManager(),
 		notifications: NewNotificationStore(historyLimit),
+		bridge:        NewBridgeManager(),
 		token:         token,
 		startTime:     time.Now(),
 	}
@@ -110,6 +112,9 @@ func (d *Daemon) Handler() http.Handler {
 	mux.HandleFunc("/api/status", d.handleStatus)
 	mux.HandleFunc("/api/sessions/", d.handleDeleteSession)
 	mux.HandleFunc("/api/sessions", d.handleSessions)
+	mux.HandleFunc("/api/bridge/register", d.handleBridgeRegister)
+	mux.HandleFunc("/api/bridge/heartbeat", d.handleBridgeHeartbeat)
+	mux.HandleFunc("/api/bridge/status", d.handleBridgeStatus)
 	if d.extraHandler != nil {
 		mux.Handle("/", d.extraHandler)
 	}
@@ -262,6 +267,53 @@ func (d *Daemon) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(DeleteSessionResponse{OK: true})
+}
+
+// --- Bridge API handlers ---
+
+// BridgeRegisterRequest is the JSON body for POST /api/bridge/register.
+type BridgeRegisterRequest struct {
+	Version        string   `json:"version"`
+	CoreMinVersion string   `json:"core_min_version"`
+	Channels       []string `json:"channels"`
+}
+
+func (d *Daemon) handleBridgeRegister(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req BridgeRegisterRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := d.bridge.Register(req.Version, req.CoreMinVersion, req.Channels); err != nil {
+		http.Error(w, "registration failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+func (d *Daemon) handleBridgeHeartbeat(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	d.bridge.Heartbeat()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+func (d *Daemon) handleBridgeStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	status := d.bridge.Status()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(status)
 }
 
 // --- Auth middleware ---

@@ -76,7 +76,3 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleStatusWebSocket is a stub for the /ws/status endpoint (to be implemented in Task 9).
-func (s *Server) handleStatusWebSocket(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "Not Implemented", http.StatusNotImplemented)
-}

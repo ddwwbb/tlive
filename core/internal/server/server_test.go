@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
@@ -97,14 +98,31 @@ func TestWebSocketRouting_Status(t *testing.T) {
 	server := httptest.NewServer(srv.Handler())
 	defer server.Close()
 
-	// /ws/status should return 501 Not Implemented (stub), not upgrade to WebSocket.
-	resp, err := http.Get(strings.Replace(server.URL, "http", "http", 1) + "/ws/status")
+	// /ws/status should upgrade to WebSocket and send an initial status JSON message.
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws/status"
+	ws, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("expected successful WebSocket upgrade for /ws/status, got error: %v (resp: %v)", err, resp)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNotImplemented {
-		t.Errorf("expected 501 Not Implemented for /ws/status, got %d", resp.StatusCode)
+	defer ws.Close()
+
+	// Read the initial status message.
+	ws.SetReadDeadline(time.Now().Add(3 * time.Second))
+	_, msg, err := ws.ReadMessage()
+	if err != nil {
+		t.Fatalf("expected initial status message, got error: %v", err)
+	}
+
+	// Verify the message contains expected fields.
+	var status map[string]interface{}
+	if err := json.Unmarshal(msg, &status); err != nil {
+		t.Fatalf("expected valid JSON status message, got error: %v (msg: %s)", err, msg)
+	}
+	if _, ok := status["active_sessions"]; !ok {
+		t.Errorf("expected 'active_sessions' field in status message, got: %v", status)
+	}
+	if _, ok := status["version"]; !ok {
+		t.Errorf("expected 'version' field in status message, got: %v", status)
 	}
 }
 

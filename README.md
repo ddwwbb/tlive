@@ -22,34 +22,75 @@ TermLive bridges your AI coding sessions to instant messaging platforms. Run Cla
 - **Cross-platform** — Linux, macOS, Windows
 - **Docker Ready** — `docker compose up` for one-click deployment
 
+## Prerequisites
+
+- **Node.js >= 22**
+- **Go 1.24+** (for building Go Core from source, or download prebuilt binary)
+- **Claude Code** (recommended) or Codex CLI
+
+## Installation
+
+### npx skills (recommended)
+
+```bash
+npx skills add termlive/termlive
+```
+
+### Git clone
+
+```bash
+git clone https://github.com/termlive/termlive.git ~/.claude/skills/termlive
+cd ~/.claude/skills/termlive/bridge && npm install && npm run build
+```
+
+Clones the repo directly into your personal skills directory. Claude Code discovers it automatically.
+
+### Symlink (for development)
+
+```bash
+git clone https://github.com/termlive/termlive.git ~/code/termlive
+mkdir -p ~/.claude/skills
+ln -s ~/code/termlive ~/.claude/skills/termlive
+cd ~/code/termlive/bridge && npm install && npm run build
+```
+
+### Verify installation
+
+Start a new Claude Code session and type `/` — you should see `termlive` in the skill list. Or ask Claude: "What skills are available?"
+
 ## Quick Start
 
-### As a Claude Code Skill
+### 1. Setup
 
-```bash
-# Install
-npx termlive setup
-
-# In Claude Code
-/termlive setup    # Interactive configuration wizard
-/termlive start    # Start Go Core + IM Bridge
-/termlive status   # Check what's running
+```
+/termlive setup
 ```
 
-### Standalone
+The wizard guides you through:
+1. **Build/install Go Core** binary
+2. **Build Bridge** (npm install + build)
+3. **Choose IM platforms** — Telegram, Discord, Feishu
+4. **Enter credentials** — one field at a time, with where-to-find instructions
+5. **General settings** — public URL, port, runtime
+6. **Validate and write config**
 
-```bash
-# One-click install
-curl -fsSL https://raw.githubusercontent.com/termlive/termlive/main/scripts/install.sh | bash
+### 2. Start
 
-# Or via npm
-npm install -g termlive
-npx termlive setup
+```
+/termlive start
 ```
 
-### Docker
+Starts Go Core + Node.js Bridge in the background. You can close the terminal — they keep running.
+
+### 3. Chat
+
+Open your IM app and send a message to your bot. Claude Code will respond. When Claude needs to use a tool, you'll see permission buttons right in the chat.
+
+### Docker (alternative)
 
 ```bash
+git clone https://github.com/termlive/termlive.git
+cd termlive
 cp .env.example .env    # Fill in your tokens
 docker compose up -d
 ```

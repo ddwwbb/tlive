@@ -12,8 +12,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/termlive/termlive/core/internal/session"
 )
 
 // DaemonConfig holds configuration for the daemon HTTP server.
@@ -30,9 +28,6 @@ type Daemon struct {
 	cfg           DaemonConfig
 	mgr           *SessionManager
 	notifications *NotificationStore
-	bridge        *BridgeManager
-	stats         *Stats
-	tokens        *TokenStore
 	token         string
 	host          string
 	startTime     time.Time
@@ -61,9 +56,6 @@ func NewDaemon(cfg DaemonConfig) *Daemon {
 		cfg:           cfg,
 		mgr:           NewSessionManager(),
 		notifications: NewNotificationStore(historyLimit),
-		bridge:        NewBridgeManager(),
-		stats:         NewStats(),
-		tokens:        NewTokenStore(),
 		token:         token,
 		host:          host,
 		startTime:     time.Now(),
@@ -90,14 +82,11 @@ func (d *Daemon) SetExtraHandler(h http.Handler) {
 
 // StatusResponse is the JSON response for GET /api/status.
 type StatusResponse struct {
-	Status         string        `json:"status"`
-	Uptime         string        `json:"uptime"`
-	Port           int           `json:"port"`
-	Sessions       int           `json:"sessions"`
-	ActiveSessions int           `json:"active_sessions"`
-	Bridge         BridgeInfo    `json:"bridge"`
-	Stats          StatsResponse `json:"stats"`
-	Version        string        `json:"version"`
+	Status   string `json:"status"`
+	Uptime   int64  `json:"uptime"`
+	Port     int    `json:"port"`
+	Sessions int    `json:"sessions"`
+	Version  string `json:"version"`
 }
 
 // --- Session management API types ---
@@ -129,12 +118,6 @@ func (d *Daemon) Handler() http.Handler {
 	mux.HandleFunc("/api/status", d.handleStatus)
 	mux.HandleFunc("/api/sessions/", d.handleDeleteSession)
 	mux.HandleFunc("/api/sessions", d.handleSessions)
-	mux.HandleFunc("/api/bridge/register", d.handleBridgeRegister)
-	mux.HandleFunc("/api/bridge/heartbeat", d.handleBridgeHeartbeat)
-	mux.HandleFunc("/api/bridge/status", d.handleBridgeStatus)
-	mux.HandleFunc("/api/stats", d.handleStats)
-	mux.HandleFunc("/api/git/status", d.handleGitStatus)
-	mux.HandleFunc("/api/tokens/scoped", d.handleCreateScopedToken)
 	if d.extraHandler != nil {
 		mux.Handle("/", d.extraHandler)
 	}
@@ -198,22 +181,13 @@ func (d *Daemon) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sessions := d.mgr.ListSessions()
-	activeSessions := 0
-	for _, s := range sessions {
-		if s.Status == session.StatusRunning {
-			activeSessions++
-		}
-	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(StatusResponse{
-		Status:         "running",
-		Uptime:         time.Since(d.startTime).Truncate(time.Second).String(),
-		Port:           d.cfg.Port,
-		Sessions:       len(sessions),
-		ActiveSessions: activeSessions,
-		Bridge:         d.bridge.Status(),
-		Stats:          d.stats.Get(),
-		Version:        "0.1.0",
+		Status:   "running",
+		Uptime:   int64(time.Since(d.startTime).Seconds()),
+		Port:     d.cfg.Port,
+		Sessions: len(sessions),
+		Version:  "0.1.0",
 	})
 }
 
@@ -322,81 +296,6 @@ func (d *Daemon) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(DeleteSessionResponse{OK: true})
 }
 
-// --- Bridge API handlers ---
-
-// BridgeRegisterRequest is the JSON body for POST /api/bridge/register.
-type BridgeRegisterRequest struct {
-	Version        string   `json:"version"`
-	CoreMinVersion string   `json:"core_min_version"`
-	Channels       []string `json:"channels"`
-}
-
-func (d *Daemon) handleBridgeRegister(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	var req BridgeRegisterRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-	if err := d.bridge.Register(req.Version, req.CoreMinVersion, req.Channels); err != nil {
-		http.Error(w, "registration failed: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
-}
-
-func (d *Daemon) handleBridgeHeartbeat(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	d.bridge.Heartbeat()
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
-}
-
-func (d *Daemon) handleBridgeStatus(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	status := d.bridge.Status()
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(status)
-}
-
-// --- Stats API handlers ---
-
-// StatsAddRequest is the JSON body for POST /api/stats.
-type StatsAddRequest struct {
-	InputTokens  int64   `json:"input_tokens"`
-	OutputTokens int64   `json:"output_tokens"`
-	CostUSD      float64 `json:"cost_usd"`
-}
-
-func (d *Daemon) handleStats(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodPost:
-		var req StatsAddRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-		d.stats.Add(req.InputTokens, req.OutputTokens, req.CostUSD)
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]bool{"ok": true})
-	case http.MethodGet:
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(d.stats.Get())
-	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-	}
-}
-
 // --- Auth middleware ---
 
 const unauthorizedHTML = `<!DOCTYPE html>
@@ -501,39 +400,6 @@ h1 {
 
 func (d *Daemon) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Check for scoped token via ?stoken= query parameter.
-		if stoken := r.URL.Query().Get("stoken"); stoken != "" {
-			st, ok := d.tokens.Validate(stoken)
-			if !ok {
-				w.Header().Set("Content-Type", "text/html; charset=utf-8")
-				w.WriteHeader(http.StatusUnauthorized)
-				w.Write([]byte(unauthorizedHTML))
-				return
-			}
-			// Scoped tokens are read-only — reject mutating methods.
-			if r.Method != http.MethodGet && r.Method != http.MethodHead {
-				http.Error(w, "scoped token is read-only", http.StatusForbidden)
-				return
-			}
-			// Scoped tokens are bound to a specific session. Enforce that the
-			// request path refers only to that session (or the session list).
-			// Any path under /api/sessions/<id> must match the scoped session.
-			const sessPrefix = "/api/sessions/"
-			if strings.HasPrefix(r.URL.Path, sessPrefix) {
-				requestedID := strings.TrimPrefix(r.URL.Path, sessPrefix)
-				// Strip any further path components (e.g. /api/sessions/<id>/ws)
-				if idx := strings.Index(requestedID, "/"); idx != -1 {
-					requestedID = requestedID[:idx]
-				}
-				if requestedID != "" && requestedID != st.SessionID {
-					http.Error(w, "scoped token not valid for this session", http.StatusForbidden)
-					return
-				}
-			}
-			next.ServeHTTP(w, r)
-			return
-		}
-
 		token := ""
 		if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
 			token = strings.TrimPrefix(auth, "Bearer ")
@@ -560,35 +426,4 @@ func (d *Daemon) authMiddleware(next http.Handler) http.Handler {
 		})
 		next.ServeHTTP(w, r)
 	})
-}
-
-// --- Scoped token API handler ---
-
-// CreateScopedTokenRequest is the JSON body for POST /api/tokens/scoped.
-type CreateScopedTokenRequest struct {
-	SessionID string        `json:"session_id"`
-	TTL       time.Duration `json:"ttl"` // nanoseconds; 0 defaults to 1 hour
-}
-
-func (d *Daemon) handleCreateScopedToken(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	var req CreateScopedTokenRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-	if req.SessionID == "" {
-		http.Error(w, "session_id is required", http.StatusBadRequest)
-		return
-	}
-	ttl := req.TTL
-	if ttl <= 0 {
-		ttl = time.Hour
-	}
-	st := d.tokens.Create(req.SessionID, ttl)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(st)
 }

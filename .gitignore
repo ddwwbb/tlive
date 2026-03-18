@@ -3,6 +3,7 @@ dist/
 *.exe
 .env
 core/tlive-core
+core/tlive
 bridge/dist/
 *.log
 .termlive.toml

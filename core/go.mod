@@ -7,7 +7,6 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/gorilla/websocket v1.5.3
 	github.com/mdp/qrterminal/v3 v3.2.1
-	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/term v0.40.0
 )

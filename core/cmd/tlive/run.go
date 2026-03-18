@@ -46,13 +46,11 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		return cmd.Help()
 	}
 
-	cfg, _ := config.LoadFromFile(".tlive.toml")
+	cfg, _ := config.LoadFromEnv()
 
 	// CLI flags override config values
 	if cmd.Flags().Changed("port") {
-		cfg.Server.Port = port
-	} else if cfg.Daemon.Port != 0 {
-		cfg.Server.Port = cfg.Daemon.Port
+		cfg.Daemon.Port = port
 	}
 
 	rows, cols := uint16(24), uint16(80)
@@ -78,7 +76,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	if isHost {
-		log.Printf("starting as host, port=%d", cfg.Server.Port)
+		log.Printf("starting as host, port=%d", cfg.Daemon.Port)
 		return runHost(cfg, args, rows, cols, lockPath)
 	}
 	log.Printf("starting as client, daemon port=%d", lock.Port)
@@ -90,7 +88,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 func runHost(cfg *config.Config, args []string, rows, cols uint16, lockPath string) error {
 	// Create daemon
 	d := daemon.NewDaemon(daemon.DaemonConfig{
-		Port: cfg.Server.Port,
+		Port: cfg.Daemon.Port,
 	})
 	mgr := d.Manager()
 
@@ -127,15 +125,15 @@ func runHost(cfg *config.Config, args []string, rows, cols uint16, lockPath stri
 
 	// Write lock file BEFORE starting listener so clients can discover us
 	daemon.WriteLockFile(lockPath, daemon.LockInfo{
-		Port:  cfg.Server.Port,
+		Port:  cfg.Daemon.Port,
 		Token: d.Token(),
 		Pid:   os.Getpid(),
 	})
 	defer daemon.RemoveLockFile(lockPath)
 
 	// Print connection info
-	url := fmt.Sprintf("http://%s:%d?token=%s", localIP, cfg.Server.Port, d.Token())
-	localURL := fmt.Sprintf("http://localhost:%d?token=%s", cfg.Server.Port, d.Token())
+	url := fmt.Sprintf("http://%s:%d?token=%s", localIP, cfg.Daemon.Port, d.Token())
+	localURL := fmt.Sprintf("http://localhost:%d?token=%s", cfg.Daemon.Port, d.Token())
 	fmt.Fprintf(os.Stderr, "\n  TLive Web UI:\n")
 	fmt.Fprintf(os.Stderr, "    Local:   %s\n", localURL)
 	fmt.Fprintf(os.Stderr, "    Network: %s\n", url)

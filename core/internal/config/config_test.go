@@ -6,75 +6,90 @@ import (
 	"testing"
 )
 
-func TestLoadDefaults(t *testing.T) {
+func TestDefault(t *testing.T) {
 	cfg := Default()
-	if cfg.Server.Port != 8080 {
-		t.Errorf("expected default port 8080, got %d", cfg.Server.Port)
+	if cfg.Daemon.Port != 8080 {
+		t.Errorf("expected default port 8080, got %d", cfg.Daemon.Port)
 	}
-	if cfg.Server.Host != "0.0.0.0" {
-		t.Errorf("expected default host 0.0.0.0, got %s", cfg.Server.Host)
+	if cfg.Daemon.Host != "0.0.0.0" {
+		t.Errorf("expected default host 0.0.0.0, got %s", cfg.Daemon.Host)
 	}
 }
 
-func TestLoadFromFile(t *testing.T) {
+func TestLoadFromEnv_Missing(t *testing.T) {
+	// Point HOME to a temp dir that has no config.env
 	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "config.toml")
-	content := []byte(`
-[server]
-port = 3000
-host = "127.0.0.1"
-`)
-	if err := os.WriteFile(cfgPath, content, 0644); err != nil {
+	t.Setenv("HOME", dir)
+
+	cfg, err := LoadFromEnv()
+	if err != nil {
+		t.Fatal("missing config.env should return defaults, not error:", err)
+	}
+	if cfg.Daemon.Port != 8080 {
+		t.Errorf("expected default port 8080, got %d", cfg.Daemon.Port)
+	}
+}
+
+func TestLoadFromEnv_Values(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+
+	cfgDir := filepath.Join(dir, ".tlive")
+	if err := os.MkdirAll(cfgDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	content := "TL_PORT=9090\nTL_TOKEN=my-token\nTL_HOST=127.0.0.1\n"
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.env"), []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	cfg, err := LoadFromFile(cfgPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Server.Port != 3000 {
-		t.Errorf("expected port 3000, got %d", cfg.Server.Port)
-	}
-	if cfg.Server.Host != "127.0.0.1" {
-		t.Errorf("expected host 127.0.0.1, got %s", cfg.Server.Host)
-	}
-}
-
-func TestLoadFromFileMissing(t *testing.T) {
-	cfg, err := LoadFromFile("/nonexistent/config.toml")
-	if err != nil {
-		t.Fatal("missing file should return defaults, not error")
-	}
-	if cfg.Server.Port != 8080 {
-		t.Errorf("expected default port 8080, got %d", cfg.Server.Port)
-	}
-}
-
-func TestLoadFromFile_WithDaemonConfig(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, ".tlive.toml")
-	content := `
-[daemon]
-port = 9090
-token = "my-token"
-`
-	os.WriteFile(path, []byte(content), 0644)
-
-	cfg, err := LoadFromFile(path)
+	cfg, err := LoadFromEnv()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cfg.Daemon.Port != 9090 {
-		t.Fatalf("expected daemon port 9090, got %d", cfg.Daemon.Port)
+		t.Errorf("expected port 9090, got %d", cfg.Daemon.Port)
 	}
 	if cfg.Daemon.Token != "my-token" {
-		t.Fatalf("expected token 'my-token', got %q", cfg.Daemon.Token)
+		t.Errorf("expected token 'my-token', got %q", cfg.Daemon.Token)
+	}
+	if cfg.Daemon.Host != "127.0.0.1" {
+		t.Errorf("expected host '127.0.0.1', got %q", cfg.Daemon.Host)
 	}
 }
 
-func TestDefault_HasSaneDefaults(t *testing.T) {
-	cfg := Default()
-	if cfg.Daemon.Port != 8080 {
-		t.Fatalf("expected default daemon port 8080, got %d", cfg.Daemon.Port)
+func TestLoadFromEnv_QuotedValues(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+
+	cfgDir := filepath.Join(dir, ".tlive")
+	os.MkdirAll(cfgDir, 0755)
+	content := `TL_TOKEN="quoted-token"` + "\n"
+	os.WriteFile(filepath.Join(cfgDir, "config.env"), []byte(content), 0644)
+
+	cfg, err := LoadFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Daemon.Token != "quoted-token" {
+		t.Errorf("expected 'quoted-token', got %q", cfg.Daemon.Token)
+	}
+}
+
+func TestLoadFromEnv_Comments(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+
+	cfgDir := filepath.Join(dir, ".tlive")
+	os.MkdirAll(cfgDir, 0755)
+	content := "# This is a comment\nTL_PORT=3000\n# Another comment\n"
+	os.WriteFile(filepath.Join(cfgDir, "config.env"), []byte(content), 0644)
+
+	cfg, err := LoadFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Daemon.Port != 3000 {
+		t.Errorf("expected port 3000, got %d", cfg.Daemon.Port)
 	}
 }

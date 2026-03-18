@@ -4,9 +4,10 @@
 
 Terminal live monitoring + IM bridge for AI coding tools.
 
-Two independent features, use either or both:
+Three features, use any combination:
 - **`tlive <cmd>`** — wrap any command with a web-accessible terminal
 - **`/tlive`** — chat with Claude Code / Codex from Telegram, Discord, or Feishu
+- **Hook Approval** — approve Claude Code tool permissions from your phone
 
 ## Install
 
@@ -14,7 +15,7 @@ Two independent features, use either or both:
 npm install -g tlive
 ```
 
-## Feature 1: Web Terminal (`tlive <cmd>`)
+## Feature 1: Web Terminal
 
 Wrap any long-running command. Access the terminal from your phone's browser.
 
@@ -23,8 +24,6 @@ tlive claude                  # Wrap Claude Code
 tlive python train.py         # Wrap a training script
 tlive npm run build           # Wrap a build
 ```
-
-Opens a web terminal at `http://localhost:8080?token=xxx` — view and interact from any device.
 
 ```
 $ tlive claude --model opus
@@ -35,79 +34,143 @@ $ tlive claude --model opus
   Session: claude (ID: a1b2c3)
 ```
 
-Multiple sessions in one dashboard:
-```bash
-# Terminal 1
-tlive claude
+Multiple sessions in one dashboard. Daemon auto-starts, auto-shuts down after 15 minutes idle.
 
-# Terminal 2 (auto-joins existing daemon)
-tlive npm run dev
-```
+## Feature 2: IM Bridge
 
-Daemon auto-starts on first `tlive <cmd>`, auto-shuts down after 15 minutes idle.
-
-## Feature 2: IM Bridge (`/tlive`)
-
-Chat with Claude Code from your phone. Get streaming responses, approve tool permissions with buttons.
+Chat with Claude Code from your phone. Start new tasks, get streaming responses.
 
 ```bash
-# First: configure IM platforms
-tlive setup
-
-# Install as Claude Code / Codex skill
-tlive install skills --claude
-tlive install skills --codex
+tlive setup                   # Configure IM platforms
+tlive install skills --claude  # Install to Claude Code
 
 # Then in Claude Code:
-/tlive                    # Start Bridge
-/tlive setup              # Reconfigure
-/tlive stop               # Stop Bridge
+/tlive                        # Start Bridge
 ```
-
-### IM Interaction
 
 ```
 You (Telegram):  "Fix the login bug in auth.ts"
 
-TLive (TG):      🔒 Permission Required
-                  Tool: Edit | File: src/auth.ts
-                  [Allow] [Allow Session] [Deny]
-
-You:              Tap [Allow]
+TLive (TG):      Streaming: "I found the issue. The token
+                  validation was missing the expiry check..."
 
 TLive (TG):      ✅ Task Complete
                   Fixed auth.ts, all tests pass
                   📊 12.3k/8.1k tok | $0.08 | 2m 34s
 ```
 
-If the web terminal is also running, IM messages include a link:
+## Feature 3: Hook Approval (Killer Feature)
+
+Approve Claude Code tool permissions from your phone. Never get blocked by a `[y/N]` prompt again.
+
+**How it works:**
+
 ```
-🖥 View Terminal → http://localhost:8080/terminal.html?id=abc
+You run Claude Code in terminal (normal usage, no wrapper needed)
+  │
+  ├── Claude wants to edit a file
+  │   → PreToolUse Hook fires
+  │   → Go Core receives, holds request
+  │   → Bridge polls, sends to Telegram:
+  │
+  │   🔒 Permission Required (Local Claude Code)
+  │   Tool: Bash
+  │   ┌──────────────────────────┐
+  │   │ rm -rf node_modules &&   │
+  │   │ npm install              │
+  │   └──────────────────────────┘
+  │   [✅ Allow]  [❌ Deny]
+  │
+  ├── You tap [Allow] on phone
+  │   → Bridge resolves → Go Core returns
+  │   → Claude Code continues
+  │
+  └── You walk away. Claude keeps working.
+      Phone buzzes only when approval needed.
 ```
 
-### Supported Platforms
+**Setup (one-time):**
+
+```bash
+# 1. Start Go Core (receives hooks)
+tlive setup
+
+# 2. Add hooks to Claude Code settings
+# ~/.claude/settings.json
+{
+  "hooks": {
+    "PreToolUse": [{
+      "type": "command",
+      "command": "~/.tlive/bin/hook-handler.sh",
+      "timeout": 300000
+    }],
+    "Notification": [{
+      "type": "command",
+      "command": "~/.tlive/bin/notify-handler.sh",
+      "timeout": 5000
+    }]
+  }
+}
+```
+
+**Safe by design:**
+- Hook script checks if Go Core is running — if not, passes through (zero impact)
+- Timeout defaults to **deny** (not allow) — security first
+- Shows exact tool name and command before you approve
+- Works with any Claude Code session, no wrapper needed
+
+## How the Three Features Relate
+
+```
+┌─ Feature 1: Web Terminal ──────┐
+│ tlive claude                    │
+│ → PTY + Web UI + QR code       │
+│ Access: browser                 │
+└─────────────────────────────────┘
+
+┌─ Feature 2: IM Bridge ─────────┐
+│ /tlive (Claude Code skill)     │
+│ → Agent SDK + Telegram/Discord │
+│ → New tasks from phone         │
+│ Access: IM app                  │
+└─────────────────────────────────┘
+
+┌─ Feature 3: Hook Approval ─────┐
+│ Claude Code hooks → Go Core    │
+│ → Bridge polls → IM buttons    │
+│ → Approve existing tasks       │
+│ Access: IM app                  │
+└─────────────────────────────────┘
+
+Features 2 & 3 need Go Core running.
+Bridge detects Go Core → IM messages include web terminal link.
+Each feature works independently.
+```
+
+## Supported Platforms
 
 | | Telegram | Discord | Feishu |
 |---|----------|---------|--------|
-| Streaming | Edit-based, 700ms | Edit-based, 1500ms | CardKit v2, 200ms |
+| IM Bridge (Feature 2) | ✅ | ✅ | ✅ |
+| Hook Approval (Feature 3) | ✅ | ✅ | ✅ |
+| Streaming responses | Edit-based | Edit-based | CardKit v2 |
 | Permission buttons | Inline keyboard | Button components | Interactive card |
-| Image | Yes | Yes | Yes |
 
 ## Commands
 
-### CLI (Go binary)
+### CLI
 
 ```bash
-tlive <cmd>                # Web terminal
+tlive <cmd>                # Web terminal (Feature 1)
 tlive stop                 # Stop daemon
-tlive setup                # Configure
+tlive setup                # Configure IM platforms
 tlive install skills       # Install to Claude Code / Codex
 ```
 
 ### Claude Code Skill
 
 ```
-/tlive                     # Start IM Bridge
+/tlive                     # Start IM Bridge (Feature 2)
 /tlive setup               # Configure IM
 /tlive stop                # Stop Bridge
 /tlive status              # Check status
@@ -126,6 +189,8 @@ TL_PUBLIC_URL=https://example.com
 
 TL_ENABLED_CHANNELS=telegram,discord
 TL_TG_BOT_TOKEN=...
+TL_TG_CHAT_ID=...
+TL_TG_ALLOWED_USERS=...
 TL_DC_BOT_TOKEN=...
 TL_FS_APP_ID=...
 TL_FS_APP_SECRET=...
@@ -134,24 +199,42 @@ TL_FS_APP_SECRET=...
 ## Architecture
 
 ```
-┌─ Feature 1: Web Terminal ──────────┐    ┌─ Feature 2: IM Bridge ──────────┐
-│                                     │    │                                  │
-│  tlive claude                       │    │  /tlive (Claude Code skill)      │
-│    └── Go binary                    │    │    └── Node.js Bridge            │
-│        ├── PTY wrapper              │    │        ├── Agent SDK             │
-│        ├── Web UI (xterm.js)        │    │        ├── Telegram adapter      │
-│        ├── HTTP API                 │    │        ├── Discord adapter       │
-│        └── WebSocket                │    │        └── Feishu adapter        │
-│                                     │    │                                  │
-│  Access: browser                    │    │  Access: phone IM app            │
-│                                     │    │                                  │
-└─────────────────────────────────────┘    └──────────────────────────────────┘
-              │                                          │
-              └───── Bridge detects Go daemon ───────────┘
-                     → IM messages include web link
+                    ┌──────────────────────┐
+                    │   Claude Code (local) │
+                    │                      │
+                    │  PreToolUse Hook ────────────┐
+                    │  Notification Hook ──────────┤
+                    └──────────────────────┘       │
+                                                   ▼
+┌─ Go Core (tlive) ───────────────────────────────────────────┐
+│                                                              │
+│  ┌──────────┐  ┌──────────────┐  ┌────────────────────────┐│
+│  │ PTY Mgr  │  │ Web UI       │  │ Hook Manager           ││
+│  │ (wrap    │  │ (dashboard + │  │ (receive hooks,        ││
+│  │  cmds)   │  │  xterm.js)   │  │  long-poll, resolve)   ││
+│  └──────────┘  └──────────────┘  └────────────────────────┘│
+│                                                              │
+│  HTTP API: /api/status, /api/sessions,                       │
+│            /api/hooks/permission, /api/hooks/pending          │
+│  WebSocket: /ws/session/:id, /ws/status                      │
+└──────────────────────────┬───────────────────────────────────┘
+                           │ Bridge polls /api/hooks/pending
+                           ▼
+┌─ Node.js Bridge ────────────────────────────────────────────┐
+│                                                              │
+│  ┌─────────────┐  ┌──────────────┐  ┌────────────────────┐ │
+│  │ Agent SDK   │  │ Telegram     │  │ Hook Poll          │ │
+│  │ (new tasks  │  │ Discord      │  │ (forward to IM,    │ │
+│  │  from IM)   │  │ Feishu       │  │  resolve on click) │ │
+│  └─────────────┘  └──────────────┘  └────────────────────┘ │
+└──────────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+                    ┌──────────────┐
+                    │  Your Phone  │
+                    │  (IM app)    │
+                    └──────────────┘
 ```
-
-Two independent components. Bridge works without Go Core. Go Core works without Bridge.
 
 ## Development
 
@@ -167,16 +250,31 @@ cd bridge && npm install && npm run build && npm test
 
 ```
 tlive/
-├── SKILL.md              # Claude Code / Codex skill
+├── SKILL.md                # Claude Code / Codex skill
 ├── config.env.example
-├── core/                  # Go → tlive binary
-│   ├── cmd/tlive/
-│   ├── internal/          # daemon, server, session, hub, pty
-│   └── web/               # Embedded Web UI
-├── bridge/                # Node.js → Bridge daemon
-│   └── src/               # providers, channels, engine, permissions, delivery
-├── scripts/               # CLI entry, status line
-├── package.json           # npm: tlive
+├── core/                   # Go → tlive binary
+│   ├── cmd/tlive/          # CLI (web terminal, stop, setup, install)
+│   ├── internal/
+│   │   ├── daemon/         # HTTP server, sessions, hooks manager
+│   │   ├── server/         # WebSocket handlers
+│   │   ├── session/        # Session state + output buffer
+│   │   ├── hub/            # Broadcast hub
+│   │   └── pty/            # PTY (Unix + Windows ConPTY)
+│   └── web/                # Embedded Web UI
+├── bridge/                 # Node.js → Bridge daemon
+│   └── src/
+│       ├── providers/      # Claude Agent SDK
+│       ├── channels/       # Telegram, Discord, Feishu adapters
+│       ├── engine/         # Conversation engine, bridge manager
+│       ├── permissions/    # Permission gateway + broker
+│       ├── delivery/       # Chunking, retry, rate limiting
+│       └── markdown/       # Per-platform rendering
+├── scripts/
+│   ├── hook-handler.sh     # PreToolUse hook → Go Core
+│   ├── notify-handler.sh   # Notification hook → Go Core
+│   ├── daemon.sh           # Bridge process management
+│   └── statusline.sh       # Claude Code status line
+├── package.json            # npm: tlive
 └── docker-compose.yml
 ```
 
@@ -185,9 +283,11 @@ tlive/
 - Default bind `127.0.0.1` (explicit `--host 0.0.0.0` for LAN)
 - Auto-generated bearer token
 - Scoped tokens for web links (1h TTL, read-only)
-- IM user whitelists
+- Hook timeout defaults to **deny** (not allow)
+- IM user whitelists per platform
 - Secret redaction in logs
 - `chmod 600` on config.env
+- Environment isolation for Claude CLI subprocess
 
 ## License
 

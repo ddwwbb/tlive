@@ -7,6 +7,8 @@ RUNTIME_DIR="${TERMLIVE_HOME}/runtime"
 LOG_DIR="${TERMLIVE_HOME}/logs"
 BIN_DIR="${TERMLIVE_HOME}/bin"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# SKILL_DIR is the repo root (one level up from scripts/)
+SKILL_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # Source config if exists
 [ -f "${TERMLIVE_HOME}/config.env" ] && set -a && source "${TERMLIVE_HOME}/config.env" && set +a
@@ -43,7 +45,9 @@ start() {
   else
     echo "Starting Go Core..."
     if [ ! -x "$BIN_DIR/tlive-core" ]; then
-      echo "ERROR: $BIN_DIR/tlive-core not found. Run 'npx termlive setup' first."
+      echo "ERROR: $BIN_DIR/tlive-core not found."
+      echo "Build: cd ${SKILL_DIR}/core && go build -o ${BIN_DIR}/tlive-core ./cmd/tlive-core/"
+      echo "Or run: /termlive setup"
       exit 1
     fi
     "$BIN_DIR/tlive-core" daemon --port "$TL_PORT" --token "$TL_TOKEN" \
@@ -57,9 +61,11 @@ start() {
     echo "Bridge is already running (PID $(cat "$RUNTIME_DIR/bridge.pid"))"
   else
     echo "Starting Bridge..."
-    local bridge_entry="${SCRIPT_DIR}/../bridge/dist/main.mjs"
+    local bridge_entry="${SKILL_DIR}/bridge/dist/main.mjs"
     if [ ! -f "$bridge_entry" ]; then
-      echo "ERROR: Bridge not built. Run 'cd bridge && npm run build' first."
+      echo "ERROR: Bridge not built."
+      echo "Build: cd ${SKILL_DIR}/bridge && npm install && npm run build"
+      echo "Or run: /termlive setup"
       exit 1
     fi
     node "$bridge_entry" >> "$LOG_DIR/bridge.log" 2>&1 &

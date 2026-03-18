@@ -7,7 +7,7 @@
     "termlive": "./scripts/cli.js"
   },
   "scripts": {
-    "postinstall": "node scripts/postinstall.js",
+    "setup:core": "node scripts/postinstall.js",
     "build": "cd bridge && npm run build",
     "test": "cd bridge && npm test",
     "test:go": "cd core && go test ./... -v -timeout 30s"

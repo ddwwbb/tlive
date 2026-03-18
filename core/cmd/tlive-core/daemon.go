@@ -39,15 +39,19 @@ func init() {
 func runDaemonStart(cmd *cobra.Command, args []string) error {
 	cfg, _ := config.LoadFromFile(".termlive.toml")
 
-	// CLI flag overrides config
+	// CLI flags override config
 	daemonPort := cfg.Daemon.Port
 	if cmd.Flags().Changed("port") {
 		daemonPort = port
 	}
+	daemonToken := cfg.Daemon.Token
+	if cmd.Flags().Changed("token") && token != "" {
+		daemonToken = token
+	}
 
 	d := daemon.NewDaemon(daemon.DaemonConfig{
 		Port:  daemonPort,
-		Token: cfg.Daemon.Token,
+		Token: daemonToken,
 	})
 
 	// Setup Web UI + WebSocket handler so clients can connect

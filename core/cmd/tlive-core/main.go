@@ -10,6 +10,7 @@ import (
 )
 
 var port int
+var token string
 
 var rootCmd = &cobra.Command{
 	Use:   "tlive",
@@ -20,6 +21,7 @@ and intelligent notifications via AI tool integration (skills/hooks).`,
 
 func init() {
 	rootCmd.PersistentFlags().IntVarP(&port, "port", "p", 8080, "Web server / daemon port")
+	rootCmd.PersistentFlags().StringVar(&token, "token", "", "Authentication token (auto-generated if empty)")
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(daemonCmd)
 }

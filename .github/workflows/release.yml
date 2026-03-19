@@ -38,8 +38,22 @@ jobs:
           name: tlive-${{ matrix.goos }}-${{ matrix.goarch }}
           path: core/tlive-*
 
+  test-bridge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install, test, build
+        working-directory: bridge
+        run: |
+          npm install
+          npm test
+          npm run build
+
   release:
-    needs: build-go
+    needs: [build-go, test-bridge]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -50,3 +64,23 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           files: tlive-*
+          generate_release_notes: true
+
+  publish-npm:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+      - name: Build Bridge
+        working-directory: bridge
+        run: |
+          npm install
+          npm run build
+      - name: Publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish

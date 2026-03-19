@@ -179,8 +179,24 @@ Add to ~/.claude/settings.json (if not already):
     break;
   }
 
-  default:
+  default: {
+    // Check for typos of known commands before forwarding to Go Core
+    const known = ['setup', 'start', 'stop', 'status', 'logs', 'hooks', 'doctor', 'install', 'help'];
+    const similar = known.find(k => {
+      if (Math.abs(k.length - command.length) > 2) return false;
+      let diff = 0;
+      for (let i = 0; i < Math.max(k.length, command.length); i++) {
+        if (k[i] !== command[i]) diff++;
+      }
+      return diff <= 2 && diff > 0;
+    });
+    if (similar) {
+      console.error(`Unknown command: ${command}`);
+      console.error(`Did you mean: tlive ${similar}?`);
+      process.exit(1);
+    }
     // Unknown command → wrap with Go Core web terminal
     runCore([command, ...args]);
     break;
+  }
 }

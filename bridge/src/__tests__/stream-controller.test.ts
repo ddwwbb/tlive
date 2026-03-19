@@ -38,11 +38,23 @@ describe('StreamController', () => {
     vi.advanceTimersByTime(300);
     await vi.runAllTimersAsync();
     expect(flushCallback).toHaveBeenCalledWith('first', false);
+    expect(ctrl.messageId).toBe('msg-1');
 
     ctrl.onTextDelta(' second');
     vi.advanceTimersByTime(300);
     await vi.runAllTimersAsync();
     expect(flushCallback).toHaveBeenCalledWith('first second', true);
+    ctrl.dispose();
+  });
+
+  it('uses fallback emoji for unknown tools', async () => {
+    const ctrl = createController(1);
+    ctrl.onToolStart('UnknownTool');
+    ctrl.onTextDelta('text');
+    vi.advanceTimersByTime(300);
+    await vi.runAllTimersAsync();
+    const content = flushCallback.mock.calls[0][0];
+    expect(content).toContain('🔧 UnknownTool');
     ctrl.dispose();
   });
 
@@ -86,11 +98,16 @@ describe('StreamController', () => {
 
   it('onComplete flushes final message with cost line at all levels', async () => {
     const ctrl = createController(0);
+    ctrl.onToolStart('Grep', { pattern: 'test' });  // should be suppressed at level 0
+    ctrl.onTextDelta('some text');                    // should be suppressed at level 0
     const stats: UsageStats = { inputTokens: 1000, outputTokens: 500, costUsd: 0.05, durationMs: 10000 };
     ctrl.onComplete(stats);
     await vi.runAllTimersAsync();
     const content = flushCallback.mock.calls[0][0];
     expect(content).toContain('📊');
+    expect(content).not.toContain('Grep');
+    expect(content).not.toContain('some text');
+    expect(content).not.toContain('──────');
     ctrl.dispose();
   });
 

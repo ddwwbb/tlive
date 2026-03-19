@@ -8,6 +8,73 @@ interface DeliveryOptions {
   interChunkDelayMs?: number;
 }
 
+export function chunkMarkdown(text: string, limit: number): string[] {
+  if (text.length <= limit) return [text];
+
+  const chunks: string[] = [];
+  const lines = text.split('\n');
+  let current = '';
+  let inCodeBlock = false;
+  let fenceLang = '';
+
+  const flush = () => {
+    if (!current) return;
+    if (inCodeBlock) {
+      chunks.push(current + '\n```');
+    } else {
+      chunks.push(current);
+    }
+    current = '';
+  };
+
+  for (const line of lines) {
+    const fenceMatch = line.match(/^(```+)(.*)/);
+    const isFence = !!fenceMatch;
+
+    const separator = current ? '\n' : '';
+    const addition = separator + line;
+    const wouldExceed = current.length + addition.length + (inCodeBlock ? 4 : 0) > limit;
+
+    if (wouldExceed && current) {
+      flush();
+      if (inCodeBlock) {
+        current = '```' + fenceLang + '\n' + line;
+      } else {
+        current = line;
+      }
+    } else {
+      current += addition;
+    }
+
+    if (isFence) {
+      if (!inCodeBlock) {
+        inCodeBlock = true;
+        fenceLang = fenceMatch![2] || '';
+      } else {
+        inCodeBlock = false;
+        fenceLang = '';
+      }
+    }
+  }
+
+  if (current) chunks.push(current);
+
+  const result: string[] = [];
+  for (const chunk of chunks) {
+    if (chunk.length <= limit) {
+      result.push(chunk);
+    } else {
+      let remaining = chunk;
+      while (remaining.length > limit) {
+        result.push(remaining.slice(0, limit));
+        remaining = remaining.slice(limit);
+      }
+      if (remaining) result.push(remaining);
+    }
+  }
+  return result;
+}
+
 export class DeliveryLayer {
   private rateLimiter = new ChatRateLimiter(20, 60_000);
 
@@ -56,21 +123,6 @@ export class DeliveryLayer {
   }
 
   private chunk(text: string, limit: number): string[] {
-    if (text.length <= limit) return [text];
-    const chunks: string[] = [];
-    // Split at line boundaries when possible
-    let remaining = text;
-    while (remaining.length > 0) {
-      if (remaining.length <= limit) {
-        chunks.push(remaining);
-        break;
-      }
-      let splitAt = remaining.lastIndexOf('\n', limit);
-      if (splitAt <= 0) splitAt = limit;
-      chunks.push(remaining.slice(0, splitAt));
-      remaining = remaining.slice(splitAt);
-      if (remaining.startsWith('\n')) remaining = remaining.slice(1);
-    }
-    return chunks;
+    return chunkMarkdown(text, limit);
   }
 }

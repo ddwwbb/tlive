@@ -62,12 +62,32 @@ function run(cmd, opts = {}) {
   }
 }
 
+function ensureBridgeRunning() {
+  const pidFile = join(homedir(), '.tlive', 'runtime', 'bridge.pid');
+  if (existsSync(pidFile)) {
+    try {
+      const pid = parseInt(readFileSync(pidFile, 'utf-8').trim(), 10);
+      process.kill(pid, 0); // check if alive
+      return; // already running
+    } catch {}
+  }
+  // Auto-start Bridge in background
+  const configFile = join(homedir(), '.tlive', 'config.env');
+  if (!existsSync(configFile)) return; // no config, skip
+  try {
+    execSync(`bash ${DAEMON_SH} start`, { stdio: 'ignore' });
+    console.log('  Bridge auto-started in background');
+  } catch {}
+}
+
 function runCore(coreArgs) {
   if (!existsSync(CORE_BIN)) {
     console.error(`Go Core not found at ${CORE_BIN}`);
     console.error('Run: npm run setup:core');
     process.exit(1);
   }
+  // Auto-start Bridge when wrapping a command (not for install/setup/help)
+  ensureBridgeRunning();
   const result = spawnSync(CORE_BIN, coreArgs, { stdio: 'inherit' });
   process.exit(result.status ?? 1);
 }

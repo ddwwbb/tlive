@@ -105,16 +105,31 @@ export class BridgeManager {
   /** Send a hook notification to IM with [Local] prefix and track for reply routing */
   async sendHookNotification(adapter: BaseChannelAdapter, chatId: string, hook: any): Promise<void> {
     const hookType = hook.tlive_hook_type || '';
-    let text: string;
+    const parts: string[] = [];
 
     if (hookType === 'stop') {
-      text = '[Local] ✅ Task complete';
+      parts.push('[Local] ✅ Task complete');
+      // Include last assistant message summary if available
+      if (hook.last_assistant_message) {
+        const summary = hook.last_assistant_message.length > 300
+          ? hook.last_assistant_message.slice(0, 297) + '...'
+          : hook.last_assistant_message;
+        parts.push('', `> ${summary.replace(/\n/g, '\n> ')}`);
+      }
     } else if (hook.notification_type === 'idle_prompt') {
-      text = `[Local] ${hook.message || 'Claude is waiting for input...'}`;
+      parts.push(`[Local] ${hook.message || 'Claude is waiting for input...'}`);
     } else {
-      text = `[Local] ${hook.message || 'Notification'}`;
+      parts.push(`[Local] ${hook.message || 'Notification'}`);
     }
 
+    // Add web terminal link if Go Core is available
+    if (this.coreAvailable && hook.tlive_session_id) {
+      const config = loadConfig();
+      const baseUrl = config.publicUrl || `http://localhost:${config.port || 8080}`;
+      parts.push('', `🔗 ${baseUrl}/terminal.html?id=${hook.tlive_session_id}&token=${this.token}`);
+    }
+
+    const text = parts.join('\n');
     const result = await adapter.send({ chatId, text });
     this.trackHookMessage(result.messageId, hook.tlive_session_id || '');
   }
@@ -146,7 +161,7 @@ export class BridgeManager {
             Authorization: `Bearer ${this.token}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ text: msg.text + '\n' }),
+          body: JSON.stringify({ text: msg.text + '\r' }),
           signal: AbortSignal.timeout(5000),
         });
         await adapter.send({ chatId: msg.chatId, text: '✓ Sent to local session' });

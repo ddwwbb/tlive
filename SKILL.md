@@ -7,9 +7,9 @@ description: |
   Use for: starting IM bridge, configuring IM platforms, checking status,
   diagnosing issues.
   Trigger phrases: "tlive", "IM bridge", "消息桥接", "手机交互", "启动桥接",
-  "连接飞书", "连接Telegram", "诊断", "查看日志".
+  "连接飞书", "连接Telegram", "诊断", "查看日志", "配置".
   Do NOT use for: building bots, webhook integrations, or general coding tasks.
-argument-hint: "setup | stop | status | doctor"
+argument-hint: "setup | stop | status | logs [N] | reconfigure | doctor"
 allowed-tools:
   - Bash
   - Read
@@ -27,17 +27,21 @@ You are managing the TLive IM Bridge — bidirectional chat with AI coding tools
 The Bridge uses the Claude Agent SDK (or Codex SDK) to interact with the AI coding tool. It is completely independent from the optional Go Core web terminal server.
 
 User data: `~/.tlive/`
-Skill directory (SKILL_DIR): the repo root where this SKILL.md lives.
+Skill directory (SKILL_DIR): the directory where this SKILL.md lives.
 
 ## Command Parsing
 
-| User says | Subcommand |
-|-----------|------------|
-| (no args), `start`, `启动` | → start bridge |
-| `setup`, `configure`, `配置`, `帮我连接 Telegram` | → setup |
-| `stop`, `停止`, `关闭` | → stop |
-| `status`, `状态` | → status |
-| `doctor`, `diagnose`, `诊断`, `挂了` | → doctor |
+| User says (examples) | Subcommand |
+|---|---|
+| (no args), `start`, `启动`, `启动桥接` | start |
+| `setup`, `configure`, `配置`, `帮我连接 Telegram` | setup |
+| `stop`, `停止`, `关闭` | stop |
+| `status`, `状态`, `运行状态` | status |
+| `logs`, `logs 200`, `查看日志` | logs |
+| `reconfigure`, `修改配置`, `换个 bot`, `改 token` | reconfigure |
+| `doctor`, `diagnose`, `诊断`, `挂了`, `没反应了` | doctor |
+
+**Disambiguation: `status` vs `doctor`** — Use `status` when the user just wants to check if the bridge is running. Use `doctor` when the user reports a problem or suspects something is broken. When in doubt and the user describes a symptom (e.g., "没反应了", "挂了"), prefer `doctor`.
 
 ## Runtime Detection
 
@@ -47,32 +51,31 @@ Skill directory (SKILL_DIR): the repo root where this SKILL.md lives.
 ## Config Check (all commands except `setup`)
 
 Before any command except `setup`, check `~/.tlive/config.env`:
-- Missing → auto-start `setup` (Claude Code) or show `SKILL_DIR/config.env.example` (other)
-- Exists → proceed
+- **Missing** → Claude Code: auto-start `setup` wizard. Codex: show `SKILL_DIR/config.env.example` and stop.
+- **Exists** → proceed
 
 ## Subcommands
 
-### `/tlive` (no args) — Start Bridge
+### `/tlive` (no args) or `start` — Start Bridge
 
 ```
 1. Check config.env → if missing, auto-start setup
-2. Check Bridge PID file → if running, show status instead
-3. Start Bridge daemon:
-   node SKILL_DIR/bridge/dist/main.mjs &
-4. Write PID to ~/.tlive/runtime/bridge.pid
-5. Check Go Core availability:
-   curl -sf http://localhost:${TL_PORT}/api/status
-6. Report:
-   "Bridge started."
-   "  Telegram: ✓ connected"
-   "  Discord:  ✓ connected"
-   If Go Core detected:
-   "  Web terminal: http://localhost:8080?token=..."
+2. Check Bridge PID → if running, show status instead
+3. Build if needed:
+   [ -f SKILL_DIR/bridge/dist/main.mjs ] || (cd SKILL_DIR/bridge && npm install && npm run build)
+4. Start Bridge daemon:
+   mkdir -p ~/.tlive/runtime
+   cd SKILL_DIR && nohup node bridge/dist/main.mjs > ~/.tlive/logs/bridge.log 2>&1 &
+   echo $! > ~/.tlive/runtime/bridge.pid
+5. Wait 2s, verify alive
+6. Report channels + web terminal status
 ```
 
 ### `setup`
 
 Interactive wizard. Collect **one field at a time**, confirm each (mask secrets to last 4 chars).
+
+Before asking for platform credentials, read `SKILL_DIR/references/setup-guides.md` internally. Only mention the specific next step the user needs — don't dump the full guide. Show the relevant guide section only if the user asks for help.
 
 **Step 1 — Choose IM platforms:**
 ```
@@ -85,23 +88,33 @@ Enter numbers (e.g., 1,3):"
 
 **Step 2 — Collect credentials per platform:**
 
-Telegram: Bot Token → Chat ID (optional) → Allowed User IDs (optional)
-Discord: Bot Token → Allowed User IDs → Allowed Channel IDs (optional)
-Feishu: App ID → App Secret → Allowed User IDs (optional)
+- **Telegram**: Bot Token → confirm (masked) → Chat ID (optional) → Allowed User IDs (optional). **Important:** At least one of Chat ID or Allowed User IDs should be set.
+- **Discord**: Bot Token → confirm (masked) → Allowed User IDs → Allowed Channel IDs (optional). **Important:** At least one of Allowed User IDs or Allowed Channel IDs should be set.
+- **Feishu**: App ID → confirm → App Secret → confirm (masked) → Allowed User IDs (optional).
 
 **Step 3 — General settings:**
 - Port (default 8080)
-- Public URL (optional, for web links in IM)
+- Public URL (optional, for web links in IM messages)
 - Auto-generate TL_TOKEN (32-char hex)
 
-**Step 4 — Write config:**
-```bash
-mkdir -p ~/.tlive/{data,logs,runtime}
-# Write ~/.tlive/config.env with all settings
-chmod 600 ~/.tlive/config.env
-```
+**Step 4 — Write config and validate:**
+1. Show a summary table (secrets masked to last 4 chars)
+2. Ask user to confirm before writing
+3. `mkdir -p ~/.tlive/{data,logs,runtime}`
+4. Write `~/.tlive/config.env`, then `chmod 600`
+5. Validate tokens — read `SKILL_DIR/references/token-validation.md` for exact commands per platform
+6. Report results. If validation fails, explain what's wrong.
+7. On success: "Setup complete! I'll start the Bridge now." Then auto-start.
 
-Tell user: "Setup complete! I'll start the Bridge now." Then auto-start bridge.
+### `reconfigure`
+
+1. Read current config from `~/.tlive/config.env`
+2. Show current settings in a table (secrets masked to last 4 chars only)
+3. Ask what the user wants to change
+4. Collect new values one at a time, show where to find each value (show full guide from `SKILL_DIR/references/setup-guides.md` only if asked)
+5. Update config file
+6. Re-validate any changed tokens
+7. Remind: "Run `/tlive stop` then `/tlive start` to apply changes."
 
 ### `stop`
 
@@ -119,42 +132,80 @@ fi
 ### `status`
 
 ```bash
-# Check Bridge
+# Bridge
 if [ -f ~/.tlive/runtime/bridge.pid ] && kill -0 "$(cat ~/.tlive/runtime/bridge.pid)" 2>/dev/null; then
   echo "Bridge: running (PID $(cat ~/.tlive/runtime/bridge.pid))"
 else
   echo "Bridge: not running"
 fi
 
-# Check Go Core (optional)
+# Go Core (optional)
 source ~/.tlive/config.env 2>/dev/null
 if curl -sf "http://localhost:${TL_PORT:-8080}/api/status" -H "Authorization: Bearer ${TL_TOKEN}" >/dev/null 2>&1; then
   echo "Web terminal: available at http://localhost:${TL_PORT:-8080}"
 else
   echo "Web terminal: not running (start with: tlive <cmd>)"
 fi
+
+# Hooks
+[ -f ~/.tlive/hooks-paused ] && echo "Hooks: ⏸ paused" || echo "Hooks: ▶ active"
+```
+
+### `logs`
+
+Extract optional line count N from arguments (default 50).
+```bash
+tail -n ${N:-50} ~/.tlive/logs/bridge.log
 ```
 
 ### `doctor`
 
-Check:
-1. Node.js version (>= 22)
-2. Config file exists and readable
-3. Bridge built (`SKILL_DIR/bridge/dist/main.mjs` exists)
-4. Bridge process running
-5. Go Core reachable (optional)
-6. IM platform token validity (if configured)
+Run diagnostics and suggest fixes. For complex issues, read `SKILL_DIR/references/troubleshooting.md`.
 
 ```bash
 echo "=== TLive Doctor ==="
-node -v || echo "Node.js: NOT FOUND"
-[ -f ~/.tlive/config.env ] && echo "Config: OK" || echo "Config: NOT FOUND"
-[ -f SKILL_DIR/bridge/dist/main.mjs ] && echo "Bridge build: OK" || echo "Bridge build: NOT FOUND — run: cd SKILL_DIR/bridge && npm run build"
+
+# Node.js
+echo -n "Node.js: " && node -v 2>/dev/null || echo "NOT FOUND — install Node.js >= 22"
+
+# Claude CLI
+echo -n "Claude CLI: " && claude --version 2>/dev/null || echo "NOT FOUND — install Claude Code"
+
+# Config
+[ -f ~/.tlive/config.env ] && echo "Config: ✓" || echo "Config: ✗ — run /tlive setup"
+
+# Bridge build
+[ -f SKILL_DIR/bridge/dist/main.mjs ] && echo "Bridge build: ✓" || echo "Bridge build: ✗ — run: cd SKILL_DIR/bridge && npm run build"
+
+# Bridge process
+if [ -f ~/.tlive/runtime/bridge.pid ] && kill -0 "$(cat ~/.tlive/runtime/bridge.pid)" 2>/dev/null; then
+  echo "Bridge: ✓ running (PID $(cat ~/.tlive/runtime/bridge.pid))"
+else
+  echo "Bridge: ✗ not running"
+fi
+
+# Go Core
+source ~/.tlive/config.env 2>/dev/null
+if curl -sf "http://localhost:${TL_PORT:-8080}/api/status" -H "Authorization: Bearer ${TL_TOKEN}" >/dev/null 2>&1; then
+  echo "Go Core: ✓ reachable"
+else
+  echo "Go Core: ○ not running (optional — needed for web terminal + hook approval)"
+fi
+
+# Hook scripts
+[ -f ~/.tlive/bin/hook-handler.sh ] && echo "Hook scripts: ✓" || echo "Hook scripts: ✗ — run: tlive install skills"
+
+# Hooks status
+[ -f ~/.tlive/hooks-paused ] && echo "Hooks: ⏸ paused" || echo "Hooks: ▶ active"
 ```
+
+Then validate IM tokens if configured — read `SKILL_DIR/references/token-validation.md` for commands.
 
 ## Notes
 
-- Always mask secrets (last 4 chars only)
+- Always mask secrets in output (show only last 4 characters)
+- Always check for config.env before starting — without it the daemon crashes and leaves a stale PID file
 - Bridge and Go Core web terminal are independent — Bridge works without Go Core
 - Go Core is started separately via `tlive <cmd>` in a terminal, not by this skill
 - Config at `~/.tlive/config.env` — shared by both Bridge and Go Core
+- The daemon runs as a background Node.js process

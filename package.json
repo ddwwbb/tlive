@@ -18,6 +18,7 @@
     "bridge/dist/",
     "bridge/package.json",
     "SKILL.md",
+    "references/",
     "config.env.example"
   ],
   "scripts": {

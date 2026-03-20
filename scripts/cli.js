@@ -215,9 +215,11 @@ switch (command) {
 
         let hooksAdded = false;
 
-        if (!hasHook('PreToolUse', hookHandlerCmd)) {
-          if (!settings.hooks.PreToolUse) settings.hooks.PreToolUse = [];
-          settings.hooks.PreToolUse.push({
+        // PermissionRequest: forward Claude Code permission dialogs to IM
+        // (replaces PreToolUse — only fires when permission is actually needed)
+        if (!hasHook('PermissionRequest', hookHandlerCmd)) {
+          if (!settings.hooks.PermissionRequest) settings.hooks.PermissionRequest = [];
+          settings.hooks.PermissionRequest.push({
             hooks: [{
               type: 'command',
               command: hookHandlerCmd,
@@ -225,6 +227,16 @@ switch (command) {
             }],
           });
           hooksAdded = true;
+        }
+
+        // Clean up legacy PreToolUse hook if present
+        if (settings.hooks.PreToolUse) {
+          settings.hooks.PreToolUse = settings.hooks.PreToolUse.filter(e => {
+            if (e.hooks) return !e.hooks.some(h => h.command?.includes('hook-handler.sh'));
+            return !e.command?.includes('hook-handler.sh');
+          });
+          if (settings.hooks.PreToolUse.length === 0) delete settings.hooks.PreToolUse;
+          hooksAdded = true; // force write to remove legacy
         }
 
         if (!hasHook('Notification', notifyHandlerCmd)) {

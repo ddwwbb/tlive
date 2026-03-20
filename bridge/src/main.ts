@@ -241,19 +241,25 @@ async function main() {
 
         // Send to all active IM adapters
         for (const adapter of manager.getAdapters()) {
-          const chatId = config.telegram.chatId;
+          let chatId = '';
+          if (adapter.channelType === 'telegram') chatId = config.telegram.chatId;
+          else if (adapter.channelType === 'discord') chatId = config.discord.allowedChannels[0] || '';
+          else chatId = manager.getLastChatId(adapter.channelType);
           if (!chatId) continue;
 
           try {
+            // Feishu WSClient doesn't support card action callbacks — use text-based approval
+            const useTextApproval = adapter.channelType === 'feishu';
             const sendResult = await adapter.send({
               chatId,
-              text,
-              buttons,
+              text: useTextApproval ? text + '\n\n💬 回复 **allow** 或 **deny**' : text,
+              buttons: useTextApproval ? undefined : buttons,
             });
-            // Track for reply routing
+            // Track for reply routing and permission resolution
             if (perm.session_id) {
               manager.trackHookMessage(sendResult.messageId, perm.session_id);
             }
+            manager.trackPermissionMessage(sendResult.messageId, perm.id, perm.session_id || '', adapter.channelType);
           } catch (err) {
             logger.warn(`Failed to send permission to ${adapter.channelType}: ${err}`);
           }
@@ -296,7 +302,10 @@ async function main() {
         if (!hookData.tlive_hook_type) continue;
 
         for (const adapter of manager.getAdapters()) {
-          const chatId = config.telegram.chatId || config.discord.allowedChannels[0] || '';
+          let chatId = '';
+          if (adapter.channelType === 'telegram') chatId = config.telegram.chatId;
+          else if (adapter.channelType === 'discord') chatId = config.discord.allowedChannels[0] || '';
+          else chatId = manager.getLastChatId(adapter.channelType);
           if (!chatId) continue;
           try {
             await manager.sendHookNotification(adapter, chatId, hookData);

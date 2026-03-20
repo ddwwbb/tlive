@@ -11,12 +11,14 @@ import (
 
 // HookPermissionRequest represents a pending permission request from a Claude Code hook
 type HookPermissionRequest struct {
-	ID        string          `json:"id"`
-	ToolName  string          `json:"tool_name"`
-	Input     json.RawMessage `json:"input"`
-	CreatedAt time.Time       `json:"created_at"`
-	Resolved  bool            `json:"-"`
-	Result    chan string      `json:"-"` // receives "allow" or "deny"
+	ID          string          `json:"id"`
+	ToolName    string          `json:"tool_name"`
+	Input       json.RawMessage `json:"input"`
+	SessionID   string          `json:"session_id,omitempty"`
+	Suggestions json.RawMessage `json:"permission_suggestions,omitempty"`
+	CreatedAt   time.Time       `json:"created_at"`
+	Resolved    bool            `json:"-"`
+	Result      chan string      `json:"-"` // receives "allow", "allow_always", or "deny"
 }
 
 // HookManager manages pending hook permission requests
@@ -34,17 +36,19 @@ func NewHookManager() *HookManager {
 }
 
 // AddPermission stores a pending permission and returns the request
-func (hm *HookManager) AddPermission(toolName string, input json.RawMessage) *HookPermissionRequest {
+func (hm *HookManager) AddPermission(toolName string, input json.RawMessage, sessionID string, suggestions json.RawMessage) *HookPermissionRequest {
 	b := make([]byte, 8)
 	rand.Read(b)
 	id := hex.EncodeToString(b)
 
 	req := &HookPermissionRequest{
-		ID:        id,
-		ToolName:  toolName,
-		Input:     input,
-		CreatedAt: time.Now(),
-		Result:    make(chan string, 1),
+		ID:          id,
+		ToolName:    toolName,
+		Input:       input,
+		SessionID:   sessionID,
+		Suggestions: suggestions,
+		CreatedAt:   time.Now(),
+		Result:      make(chan string, 1),
 	}
 
 	hm.mu.Lock()

@@ -97,6 +97,9 @@ func runHost(cfg *config.Config, args []string, rows, cols uint16, lockPath stri
 	})
 	mgr := d.Manager()
 
+	// Start reaper to clean up orphaned client-mode sessions (e.g. killed by timeout)
+	mgr.StartReaper(60 * time.Second)
+
 	// Create session directly (in-process, no HTTP)
 	ms, err := mgr.CreateSession(args[0], args[1:], daemon.SessionConfig{
 		Rows: rows, Cols: cols,

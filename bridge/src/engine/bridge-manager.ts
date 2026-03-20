@@ -10,7 +10,7 @@ import { loadConfig } from '../config.js';
 import { markdownToTelegram } from '../markdown/index.js';
 import { StreamController, type VerboseLevel } from './stream-controller.js';
 import { CostTracker } from './cost-tracker.js';
-import { existsSync, writeFileSync, unlinkSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 
@@ -38,13 +38,26 @@ export class BridgeManager {
   private coreAvailable = false;
   private verboseLevels = new Map<string, VerboseLevel>();
   private lastActive = new Map<string, number>();
+  private lastChatId = new Map<string, string>();
   private hookMessages = new Map<string, { sessionId: string; timestamp: number }>();
+  private permissionMessages = new Map<string, { permissionId: string; sessionId: string; timestamp: number }>();
+  private latestPermission = new Map<string, { permissionId: string; sessionId: string; messageId: string }>();
+
+  private chatIdFile: string;
 
   constructor() {
     const config = loadConfig();
     this.broker = new PermissionBroker(this.gateway, config.publicUrl);
     this.coreUrl = config.coreUrl;
     this.token = config.token;
+    // Load persisted chatIds (so hook routing works without needing a message first)
+    this.chatIdFile = join(homedir(), '.tlive', 'runtime', 'chat-ids.json');
+    try {
+      const data = JSON.parse(readFileSync(this.chatIdFile, 'utf-8'));
+      for (const [k, v] of Object.entries(data)) {
+        if (typeof v === 'string') this.lastChatId.set(k, v);
+      }
+    } catch { /* no saved chat IDs yet */ }
   }
 
   /** Expose coreAvailable flag for main.ts polling loop */
@@ -55,6 +68,11 @@ export class BridgeManager {
   /** Returns all active adapters */
   getAdapters(): BaseChannelAdapter[] {
     return Array.from(this.adapters.values());
+  }
+
+  /** Get the last active chatId for a given channel type (for hook routing) */
+  getLastChatId(channelType: string): string {
+    return this.lastChatId.get(channelType) ?? '';
   }
 
   registerAdapter(adapter: BaseChannelAdapter): void {
@@ -115,6 +133,24 @@ export class BridgeManager {
     }
   }
 
+  /** Track a permission message for text-based approval (Feishu) */
+  trackPermissionMessage(messageId: string, permissionId: string, sessionId: string, channelType: string): void {
+    this.permissionMessages.set(messageId, { permissionId, sessionId, timestamp: Date.now() });
+    this.latestPermission.set(channelType, { permissionId, sessionId, messageId });
+    for (const [id, entry] of this.permissionMessages) {
+      if (Date.now() - entry.timestamp > 24 * 60 * 60 * 1000) this.permissionMessages.delete(id);
+    }
+  }
+
+  /** Parse text as a permission decision */
+  private parsePermissionText(text: string): string | null {
+    const t = text.trim().toLowerCase();
+    if (['allow', 'a', 'yes', 'y', '允许', '通过'].includes(t)) return 'allow';
+    if (['deny', 'd', 'no', 'n', '拒绝', '否'].includes(t)) return 'deny';
+    if (['always', '始终允许'].includes(t)) return 'allow_always';
+    return null;
+  }
+
   /** Send a hook notification to IM with [Local] prefix and track for reply routing */
   async sendHookNotification(adapter: BaseChannelAdapter, chatId: string, hook: HookNotificationData): Promise<void> {
     const hookType = hook.tlive_hook_type || '';
@@ -167,6 +203,50 @@ export class BridgeManager {
   async handleInboundMessage(adapter: BaseChannelAdapter, msg: InboundMessage): Promise<boolean> {
     // Auth check
     if (!adapter.isAuthorized(msg.userId, msg.chatId)) return false;
+
+    // Track last active chatId per channel type (used for hook notification routing)
+    if (msg.chatId) {
+      this.lastChatId.set(adapter.channelType, msg.chatId);
+      // Persist so hooks work even after Bridge restart
+      try {
+        mkdirSync(join(homedir(), '.tlive', 'runtime'), { recursive: true });
+        writeFileSync(this.chatIdFile, JSON.stringify(Object.fromEntries(this.lastChatId)));
+      } catch { /* non-fatal */ }
+    }
+
+    // Text-based permission resolution (for adapters without card action callbacks, e.g. Feishu)
+    if (msg.text) {
+      const decision = this.parsePermissionText(msg.text);
+      if (decision) {
+        // Check quote-reply first, fall back to latest pending permission
+        let permEntry = msg.replyToMessageId ? this.permissionMessages.get(msg.replyToMessageId) : undefined;
+        if (!permEntry) {
+          const latest = this.latestPermission.get(adapter.channelType);
+          if (latest) permEntry = this.permissionMessages.get(latest.messageId);
+        }
+        if (permEntry && this.coreAvailable) {
+          try {
+            await fetch(`${this.coreUrl}/api/hooks/permission/${permEntry.permissionId}/resolve`, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${this.token}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ decision }),
+              signal: AbortSignal.timeout(5000),
+            });
+            const label = decision === 'deny' ? '❌ Denied' : decision === 'allow_always' ? '📌 Always allowed' : '✅ Allowed';
+            await adapter.send({ chatId: msg.chatId, text: label });
+            // Clean up
+            for (const [id, e] of this.permissionMessages) {
+              if (e.permissionId === permEntry.permissionId) this.permissionMessages.delete(id);
+            }
+            const latest = this.latestPermission.get(adapter.channelType);
+            if (latest?.permissionId === permEntry.permissionId) this.latestPermission.delete(adapter.channelType);
+          } catch (err) {
+            await adapter.send({ chatId: msg.chatId, text: `❌ Failed to resolve: ${err}` });
+          }
+          return true;
+        }
+      }
+    }
 
     // Reply routing: quote-reply to a hook message → send to PTY stdin
     if (msg.text && msg.replyToMessageId && this.hookMessages.has(msg.replyToMessageId)) {

@@ -41,16 +41,18 @@ func (ms *ManagedSession) ExitCode() int {
 
 // SessionManager coordinates the lifecycle of multiple managed sessions.
 type SessionManager struct {
-	store    *session.Store
-	mu       sync.RWMutex
-	managed  map[string]*ManagedSession
+	store       *session.Store
+	mu          sync.RWMutex
+	managed     map[string]*ManagedSession
+	noClientAt  map[string]time.Time // tracks when a session first had 0 clients
 }
 
 // NewSessionManager creates a new SessionManager.
 func NewSessionManager() *SessionManager {
 	return &SessionManager{
-		store:   session.NewStore(),
-		managed: make(map[string]*ManagedSession),
+		store:      session.NewStore(),
+		managed:    make(map[string]*ManagedSession),
+		noClientAt: make(map[string]time.Time),
 	}
 }
 
@@ -241,4 +243,38 @@ func (m *SessionManager) ActiveCount() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return len(m.managed)
+}
+
+// StartReaper launches a goroutine that periodically checks for orphaned
+// sessions (sessions with no connected clients for longer than timeout).
+// This handles cases where client processes are killed without cleanup.
+func (m *SessionManager) StartReaper(timeout time.Duration) {
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			m.mu.RLock()
+			var toReap []string
+			for id, ms := range m.managed {
+				if ms.Hub.ClientCount() == 0 {
+					if first, ok := m.noClientAt[id]; ok {
+						if time.Since(first) > timeout {
+							toReap = append(toReap, id)
+						}
+					} else {
+						m.noClientAt[id] = time.Now()
+					}
+				} else {
+					delete(m.noClientAt, id)
+				}
+			}
+			m.mu.RUnlock()
+
+			for _, id := range toReap {
+				log.Printf("reaping orphaned session %s (no clients for %v)", id, timeout)
+				_ = m.StopSession(id)
+				delete(m.noClientAt, id)
+			}
+		}
+	}()
 }

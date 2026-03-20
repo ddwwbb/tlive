@@ -5,6 +5,7 @@ const mockMessageCreate = vi.fn();
 const mockMessagePatch = vi.fn().mockResolvedValue({});
 const mockEventHandler = vi.fn();
 const mockCardHandler = vi.fn();
+const mockWsStart = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('@larksuiteoapi/node-sdk', () => {
   const MockClient = vi.fn(function (this: any) {
@@ -43,28 +44,19 @@ vi.mock('@larksuiteoapi/node-sdk', () => {
     });
   });
 
+  const MockWSClient = vi.fn(function (this: any) {
+    this.start = mockWsStart;
+  });
+
   return {
     Client: MockClient,
     EventDispatcher: MockEventDispatcher,
     CardActionHandler: MockCardActionHandler,
+    WSClient: MockWSClient,
   };
 });
 
 import { FeishuAdapter } from '../channels/feishu.js';
-
-async function getPort(adapter: FeishuAdapter): Promise<number> {
-  const server = (adapter as any).server;
-  return server?.address()?.port ?? 0;
-}
-
-async function postToEndpoint(port: number, path: string, body: object): Promise<any> {
-  const resp = await fetch(`http://localhost:${port}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  return resp.json();
-}
 
 describe('FeishuAdapter', () => {
   let adapter: FeishuAdapter;
@@ -119,37 +111,7 @@ describe('FeishuAdapter', () => {
   });
 
   describe('send()', () => {
-    it('sends interactive card when buttons are present', async () => {
-      await adapter.start();
-      const result = await adapter.send({
-        chatId: 'oc_chat123',
-        text: 'Do you want to allow access?',
-        buttons: [
-          { label: 'Allow', callbackData: 'perm:allow:123', style: 'primary' },
-          { label: 'Deny', callbackData: 'perm:deny:123', style: 'danger' },
-        ],
-      });
-
-      expect(mockMessageCreate).toHaveBeenCalledOnce();
-      const call = mockMessageCreate.mock.calls[0][0];
-      expect(call.data.msg_type).toBe('interactive');
-
-      const card = JSON.parse(call.data.content);
-      expect(card.config.wide_screen_mode).toBe(true);
-      expect(card.elements[0].tag).toBe('markdown');
-      expect(card.elements[0].content).toBe('Do you want to allow access?');
-      expect(card.elements[1].tag).toBe('action');
-      expect(card.elements[1].actions).toHaveLength(2);
-      expect(card.elements[1].actions[0].text.content).toBe('Allow');
-      expect(card.elements[1].actions[0].value.action).toBe('perm:allow:123');
-      expect(card.elements[1].actions[1].type).toBe('danger');
-
-      expect(result.success).toBe(true);
-      expect(result.messageId).toBe('msg-feishu-1');
-      await adapter.stop();
-    });
-
-    it('sends post message for plain text (no buttons)', async () => {
+    it('always sends interactive card', async () => {
       await adapter.start();
       const result = await adapter.send({
         chatId: 'oc_chat123',
@@ -158,40 +120,34 @@ describe('FeishuAdapter', () => {
 
       expect(mockMessageCreate).toHaveBeenCalledOnce();
       const call = mockMessageCreate.mock.calls[0][0];
-      expect(call.data.msg_type).toBe('post');
-
-      const post = JSON.parse(call.data.content);
-      expect(post.zh_cn.content[0][0].tag).toBe('md');
-      expect(post.zh_cn.content[0][0].text).toBe('Hello from TermLive');
+      expect(call.data.msg_type).toBe('interactive');
+      const card = JSON.parse(call.data.content);
+      expect(card.config.wide_screen_mode).toBe(true);
+      expect(card.elements[0].tag).toBe('markdown');
+      expect(card.elements[0].content).toBe('Hello from TermLive');
 
       expect(result.success).toBe(true);
       expect(result.messageId).toBe('msg-feishu-1');
       await adapter.stop();
     });
 
-    it('uses html content as text when text is not provided', async () => {
-      await adapter.start();
-      await adapter.send({ chatId: 'oc_chat123', html: '**bold**' });
-
-      const call = mockMessageCreate.mock.calls[0][0];
-      expect(call.data.msg_type).toBe('post');
-      const post = JSON.parse(call.data.content);
-      expect(post.zh_cn.content[0][0].text).toBe('**bold**');
-      await adapter.stop();
-    });
-
-    it('sends message content using markdown tag', async () => {
+    it('includes action buttons in card when provided', async () => {
       await adapter.start();
       await adapter.send({
         chatId: 'oc_chat123',
-        text: '**Permission Request**\nUser wants access',
-        buttons: [{ label: 'OK', callbackData: 'ok:1' }],
+        text: 'Permission?',
+        buttons: [
+          { label: 'Allow', callbackData: 'perm:allow:123', style: 'primary' },
+          { label: 'Deny', callbackData: 'perm:deny:123', style: 'danger' },
+        ],
       });
 
       const call = mockMessageCreate.mock.calls[0][0];
       const card = JSON.parse(call.data.content);
-      // markdown element carries the text
-      expect(card.elements[0].tag).toBe('markdown');
+      expect(card.elements[1].tag).toBe('action');
+      expect(card.elements[1].actions).toHaveLength(2);
+      expect(card.elements[1].actions[0].text.content).toBe('Allow');
+      expect(card.elements[1].actions[1].type).toBe('danger');
       await adapter.stop();
     });
 
@@ -226,9 +182,9 @@ describe('FeishuAdapter', () => {
   });
 
   describe('start() / stop()', () => {
-    it('initializes client on start', async () => {
+    it('initializes client and WSClient on start', async () => {
       await adapter.start();
-      // After start, send should not throw "not started"
+      expect(mockWsStart).toHaveBeenCalledOnce();
       await expect(
         adapter.send({ chatId: 'oc_chat', text: 'test' }),
       ).resolves.toBeDefined();
@@ -252,18 +208,14 @@ describe('FeishuAdapter', () => {
   });
 
   describe('editMessage()', () => {
-    it('patches message with interactive card', async () => {
+    it('silently ignores errors (non-fatal)', async () => {
       await adapter.start();
+      mockMessagePatch.mockRejectedValueOnce(new Error('400 not a card'));
+      // Should not throw
       await adapter.editMessage('oc_chat123', 'msg-feishu-1', {
         chatId: 'oc_chat123',
         text: 'Updated content',
       });
-      expect(mockMessagePatch).toHaveBeenCalledOnce();
-      const call = mockMessagePatch.mock.calls[0][0];
-      expect(call.path.message_id).toBe('msg-feishu-1');
-      const card = JSON.parse(call.data.content);
-      expect(card.elements[0].tag).toBe('markdown');
-      expect(card.elements[0].content).toBe('Updated content');
       await adapter.stop();
     });
 
@@ -281,59 +233,62 @@ describe('FeishuAdapter', () => {
     });
   });
 
-  describe('webhook event handling', () => {
-    it('processes text messages via webhook', async () => {
+  describe('event handling via WSClient', () => {
+    it('processes text messages and strips @mentions', async () => {
       await adapter.start();
-      const port = await getPort(adapter);
 
-      await postToEndpoint(port, '/event', {
-        event: {
-          message: {
-            message_id: 'msg_1', chat_id: 'chat_1',
-            message_type: 'text',
-            content: JSON.stringify({ text: 'Hello' }),
-          },
-          sender: { sender_id: { user_id: 'user_1' } },
+      // Simulate event handler being called (via registered handler)
+      await mockEventHandler({
+        message: {
+          message_id: 'msg_1', chat_id: 'chat_1',
+          message_type: 'text',
+          content: JSON.stringify({ text: '@_user_1 Hello' }),
         },
+        sender: { sender_id: { user_id: 'user_1', open_id: 'ou_123' } },
       });
 
       const msg = await adapter.consumeOne();
       expect(msg).not.toBeNull();
       expect(msg!.text).toBe('Hello');
       expect(msg!.chatId).toBe('chat_1');
+      expect(msg!.userId).toBe('user_1');
 
       await adapter.stop();
     });
 
-    it('handles URL verification challenge', async () => {
+    it('uses open_id when user_id is empty', async () => {
       await adapter.start();
-      const port = await getPort(adapter);
 
-      const resp = await postToEndpoint(port, '/event', {
-        type: 'url_verification',
-        challenge: 'test_challenge',
-      });
-      expect(resp.challenge).toBe('test_challenge');
-
-      await adapter.stop();
-    });
-  });
-
-  describe('card action callbacks', () => {
-    it('processes button clicks as callbackData', async () => {
-      await adapter.start();
-      const port = await getPort(adapter);
-
-      await postToEndpoint(port, '/card', {
-        action: { value: { action: 'perm:allow:123:s1' } },
-        open_chat_id: 'chat_1',
-        open_id: 'user_1',
-        open_message_id: 'msg_1',
+      await mockEventHandler({
+        message: {
+          message_id: 'msg_1', chat_id: 'chat_1',
+          message_type: 'text',
+          content: JSON.stringify({ text: 'hi' }),
+        },
+        sender: { sender_id: { user_id: '', open_id: 'ou_456' } },
       });
 
       const msg = await adapter.consumeOne();
-      expect(msg).not.toBeNull();
-      expect(msg!.callbackData).toBe('perm:allow:123:s1');
+      expect(msg!.userId).toBe('ou_456');
+
+      await adapter.stop();
+    });
+
+    it('extracts replyToMessageId from parent_id or root_id', async () => {
+      await adapter.start();
+
+      await mockEventHandler({
+        message: {
+          message_id: 'msg_2', chat_id: 'chat_1',
+          message_type: 'text',
+          content: JSON.stringify({ text: 'reply' }),
+          root_id: 'msg_parent',
+        },
+        sender: { sender_id: { user_id: 'user_1' } },
+      });
+
+      const msg = await adapter.consumeOne();
+      expect(msg!.replyToMessageId).toBe('msg_parent');
 
       await adapter.stop();
     });

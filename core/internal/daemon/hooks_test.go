@@ -9,8 +9,8 @@ import (
 func TestHookManager_AddPermission_UniqueID(t *testing.T) {
 	hm := NewHookManager()
 
-	req1 := hm.AddPermission("Bash", json.RawMessage(`{"command":"ls"}`))
-	req2 := hm.AddPermission("Read", json.RawMessage(`{"file_path":"/tmp/foo"}`))
+	req1 := hm.AddPermission("Bash", json.RawMessage(`{"command":"ls"}`), "", nil)
+	req2 := hm.AddPermission("Read", json.RawMessage(`{"file_path":"/tmp/foo"}`), "", nil)
 
 	if req1.ID == "" {
 		t.Fatal("expected non-empty ID for req1")
@@ -28,7 +28,7 @@ func TestHookManager_AddPermission_UniqueID(t *testing.T) {
 
 func TestHookManager_WaitForResolution_Allow(t *testing.T) {
 	hm := NewHookManager()
-	req := hm.AddPermission("Bash", json.RawMessage(`{"command":"echo hi"}`))
+	req := hm.AddPermission("Bash", json.RawMessage(`{"command":"echo hi"}`), "", nil)
 
 	go func() {
 		time.Sleep(20 * time.Millisecond)
@@ -46,7 +46,7 @@ func TestHookManager_WaitForResolution_Timeout(t *testing.T) {
 	// Override timeout to something very short for the test
 	hm.timeout = 50 * time.Millisecond
 
-	req := hm.AddPermission("Bash", json.RawMessage(`{"command":"sleep 100"}`))
+	req := hm.AddPermission("Bash", json.RawMessage(`{"command":"sleep 100"}`), "", nil)
 
 	start := time.Now()
 	result := hm.WaitForResolution(req)
@@ -75,8 +75,8 @@ func TestHookManager_ListPending(t *testing.T) {
 		t.Fatalf("expected 0 pending, got %d", len(pending))
 	}
 
-	req1 := hm.AddPermission("Bash", json.RawMessage(`{}`))
-	req2 := hm.AddPermission("Read", json.RawMessage(`{}`))
+	req1 := hm.AddPermission("Bash", json.RawMessage(`{}`), "", nil)
+	req2 := hm.AddPermission("Read", json.RawMessage(`{}`), "", nil)
 
 	pending := hm.ListPending()
 	if len(pending) != 2 {

@@ -356,22 +356,37 @@ func (d *Daemon) handleHookPermission(w http.ResponseWriter, r *http.Request) {
 	}
 	json.Unmarshal(rawBody, &body)
 
-	// If tool_name is empty, try to extract from the raw hook data
+	// Extract additional fields from the raw hook data
+	var hookData map[string]interface{}
+	json.Unmarshal(rawBody, &hookData)
+
 	if body.ToolName == "" {
-		var hookData map[string]interface{}
-		json.Unmarshal(rawBody, &hookData)
 		if tn, ok := hookData["tool_name"].(string); ok {
 			body.ToolName = tn
 		}
 	}
 
-	req := d.hooks.AddPermission(body.ToolName, body.Input)
+	// Extract session ID injected by hook script
+	sessionID, _ := hookData["tlive_session_id"].(string)
+
+	// Extract permission_suggestions for "always allow" option
+	var suggestions json.RawMessage
+	if s, ok := hookData["permission_suggestions"]; ok {
+		suggestions, _ = json.Marshal(s)
+	}
+
+	req := d.hooks.AddPermission(body.ToolName, body.Input, sessionID, suggestions)
 
 	// Long-poll: block until resolved or timeout
 	decision := d.hooks.WaitForResolution(req)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"decision": decision})
+	resp := map[string]interface{}{"decision": decision}
+	// Include suggestions for "allow_always" so hook script can build updatedPermissions
+	if decision == "allow_always" && req.Suggestions != nil {
+		resp["suggestions"] = json.RawMessage(req.Suggestions)
+	}
+	json.NewEncoder(w).Encode(resp)
 }
 
 // handleHookPermissionResolve handles POST /api/hooks/permission/:id/resolve
@@ -393,7 +408,7 @@ func (d *Daemon) handleHookPermissionResolve(w http.ResponseWriter, r *http.Requ
 		Decision string `json:"decision"`
 	}
 	json.NewDecoder(r.Body).Decode(&body)
-	if body.Decision != "allow" && body.Decision != "deny" {
+	if body.Decision != "allow" && body.Decision != "deny" && body.Decision != "allow_always" {
 		body.Decision = "deny"
 	}
 
@@ -418,12 +433,32 @@ func (d *Daemon) handleHooksPending(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleHookNotify handles POST /api/hooks/notify — receives notification, stores for Bridge polling.
+// For stop notifications, enriches with PTY last output while the session is still alive.
 func (d *Daemon) handleHookNotify(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	rawBody, _ := io.ReadAll(r.Body)
+
+	// Try to enrich stop notifications with session last output
+	var hookData map[string]interface{}
+	if err := json.Unmarshal(rawBody, &hookData); err == nil {
+		if hookData["tlive_hook_type"] == "stop" {
+			if sid, ok := hookData["tlive_session_id"].(string); ok && sid != "" {
+				if ms, found := d.mgr.GetSession(sid); found {
+					lastOutput := stripANSI(string(ms.Session.LastOutput(500)))
+					if lastOutput != "" {
+						hookData["last_output"] = lastOutput
+						if enriched, err := json.Marshal(hookData); err == nil {
+							rawBody = enriched
+						}
+					}
+				}
+			}
+		}
+	}
+
 	d.notifications.Add(NotifyProgress, string(rawBody), "")
 	w.WriteHeader(http.StatusOK)
 }

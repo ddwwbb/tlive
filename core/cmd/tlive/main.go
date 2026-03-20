@@ -24,6 +24,8 @@ func init() {
 	rootCmd.PersistentFlags().IntVarP(&port, "port", "p", 8080, "Web server port")
 	rootCmd.PersistentFlags().StringVar(&token, "token", "", "Auth token")
 	rootCmd.Flags().StringVar(&publicIP, "ip", "", "Override auto-detected LAN IP address")
+	// Allow unknown flags to pass through to wrapped commands (e.g. tlive claude -r)
+	rootCmd.FParseErrWhitelist = cobra.FParseErrWhitelist{UnknownFlags: true}
 	rootCmd.AddCommand(stopCmd)
 	rootCmd.AddCommand(setupCmd)
 	rootCmd.AddCommand(installCmd)

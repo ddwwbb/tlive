@@ -66,7 +66,7 @@ Before any command except `setup`, check `~/.tlive/config.env`:
    [ -f SKILL_DIR/bridge/dist/main.mjs ] || (cd SKILL_DIR/bridge && npm install && npm run build)
 4. Start Bridge daemon:
    mkdir -p ~/.tlive/runtime
-   cd SKILL_DIR && nohup node bridge/dist/main.mjs > ~/.tlive/logs/bridge.log 2>&1 &
+   cd SKILL_DIR && nohup node bridge/dist/main.mjs > ~/.tlive/logs/bridge-console.log 2>&1 &
    echo $! > ~/.tlive/runtime/bridge.pid
 5. Wait 2s, verify alive
 6. Report channels + web terminal status

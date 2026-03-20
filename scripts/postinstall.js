@@ -48,7 +48,7 @@ function download(url, dest) {
 function copyHookScripts() {
   mkdirSync(BIN_DIR, { recursive: true });
 
-  const scripts = ['hook-handler.sh', 'notify-handler.sh'];
+  const scripts = ['hook-handler.sh', 'notify-handler.sh', 'stop-handler.sh'];
   for (const script of scripts) {
     const src = join(__dirname, script);
     const dest = join(BIN_DIR, script);

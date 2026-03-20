@@ -1,5 +1,4 @@
-import { createServer, type Server } from 'node:http';
-import { Client, EventDispatcher, CardActionHandler } from '@larksuiteoapi/node-sdk';
+import { Client, WSClient, EventDispatcher, CardActionHandler } from '@larksuiteoapi/node-sdk';
 import { BaseChannelAdapter, registerAdapterFactory } from './base.js';
 import type { InboundMessage, OutboundMessage, SendResult, FileAttachment } from './types.js';
 import { loadConfig } from '../config.js';
@@ -45,7 +44,7 @@ interface FeishuConfig {
 export class FeishuAdapter extends BaseChannelAdapter {
   readonly channelType = 'feishu' as const;
   private client: Client | null = null;
-  private server: Server | null = null;
+  private wsClient: WSClient | null = null;
   private config: FeishuConfig;
   private messageQueue: InboundMessage[] = [];
 
@@ -66,11 +65,13 @@ export class FeishuAdapter extends BaseChannelAdapter {
     });
 
     eventDispatcher.register({
-      'im.message.receive_v1': async (event: { sender?: { sender_id?: { user_id?: string } }; message?: { message_type?: string; content: string; chat_id: string; message_id: string } }) => {
+      'im.message.receive_v1': async (event: { sender?: { sender_id?: { user_id?: string; open_id?: string; union_id?: string } }; message?: { message_type?: string; content: string; chat_id: string; message_id: string; parent_id?: string; root_id?: string } }) => {
         const msg = event?.message;
         if (!msg) return;
 
-        const userId = event?.sender?.sender_id?.user_id ?? '';
+        const senderId = event?.sender?.sender_id;
+        // Use user_id as primary identifier; store open_id as fallback for auth matching
+        const userId = senderId?.user_id || senderId?.open_id || '';
         const attachments: FileAttachment[] = [];
 
         if (msg.message_type === 'text') {
@@ -78,6 +79,8 @@ export class FeishuAdapter extends BaseChannelAdapter {
           try {
             const content = JSON.parse(msg.content);
             text = content.text ?? '';
+            // Strip @mention placeholders (e.g. "@_user_1 ") from group chat messages
+            text = text.replace(/@_user_\d+\s*/g, '').trim();
           } catch {
             return;
           }
@@ -88,6 +91,7 @@ export class FeishuAdapter extends BaseChannelAdapter {
             userId,
             text,
             messageId: msg.message_id,
+            replyToMessageId: msg.parent_id || msg.root_id || undefined,
           });
         } else if (msg.message_type === 'image') {
           try {
@@ -174,52 +178,17 @@ export class FeishuAdapter extends BaseChannelAdapter {
       return {};
     });
 
-    this.server = createServer(async (req, res) => {
-      if (req.method !== 'POST') {
-        res.writeHead(404);
-        res.end('Not Found');
-        return;
-      }
-
-      const chunks: Buffer[] = [];
-      for await (const chunk of req) {
-        chunks.push(chunk as Buffer);
-      }
-      const body = Buffer.concat(chunks).toString('utf-8');
-
-      let result: unknown;
-      try {
-        if (req.url === '/event') {
-          result = await eventDispatcher.invoke(body);
-        } else if (req.url === '/card') {
-          result = await cardHandler.invoke(body);
-        } else {
-          res.writeHead(404);
-          res.end('Not Found');
-          return;
-        }
-      } catch (err) {
-        res.writeHead(500);
-        res.end('Internal Server Error');
-        return;
-      }
-
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(result ?? {}));
+    // Use WebSocket long connection (no public callback URL needed)
+    this.wsClient = new WSClient({
+      appId: this.config.appId,
+      appSecret: this.config.appSecret,
     });
 
-    await new Promise<void>((resolve) => {
-      this.server!.listen(this.config.webhookPort, () => resolve());
-    });
+    await this.wsClient.start({ eventDispatcher });
   }
 
   async stop(): Promise<void> {
-    if (this.server) {
-      await new Promise<void>((resolve, reject) => {
-        this.server!.close((err) => (err ? reject(err) : resolve()));
-      });
-      this.server = null;
-    }
+    this.wsClient = null;
     this.client = null;
   }
 
@@ -256,40 +225,19 @@ export class FeishuAdapter extends BaseChannelAdapter {
     const raw = message.text ?? message.html ?? '';
 
     try {
-      if (message.buttons?.length) {
-        const result = await this.client.im.message.create({
-          params: { receive_id_type: 'chat_id' },
-          data: {
-            receive_id: message.chatId,
-            msg_type: 'interactive',
-            content: this.buildCard(raw, message.buttons),
-            ...(message.replyToMessageId ? { root_id: message.replyToMessageId } : {}),
-          },
-        });
+      // Always use interactive card format so editMessage (patch) works for streaming updates
+      const result = await this.client.im.message.create({
+        params: { receive_id_type: 'chat_id' },
+        data: {
+          receive_id: message.chatId,
+          msg_type: 'interactive',
+          content: this.buildCard(raw, message.buttons),
+          ...(message.replyToMessageId ? { root_id: message.replyToMessageId } : {}),
+        },
+      });
 
-        const messageId = (result as FeishuCreateMessageResult)?.data?.message_id ?? '';
-        return { messageId: String(messageId), success: true };
-      } else {
-        const text = markdownToFeishu(raw);
-        const post = {
-          zh_cn: {
-            content: [[{ tag: 'md', text }]],
-          },
-        };
-
-        const result = await this.client.im.message.create({
-          params: { receive_id_type: 'chat_id' },
-          data: {
-            receive_id: message.chatId,
-            msg_type: 'post',
-            content: JSON.stringify(post),
-            ...(message.replyToMessageId ? { root_id: message.replyToMessageId } : {}),
-          },
-        });
-
-        const messageId = (result as FeishuCreateMessageResult)?.data?.message_id ?? '';
-        return { messageId: String(messageId), success: true };
-      }
+      const messageId = (result as FeishuCreateMessageResult)?.data?.message_id ?? '';
+      return { messageId: String(messageId), success: true };
     } catch (err) {
       throw classifyError('feishu', err);
     }
@@ -306,8 +254,8 @@ export class FeishuAdapter extends BaseChannelAdapter {
           content: this.buildCard(text, message.buttons),
         },
       });
-    } catch (err) {
-      throw classifyError('feishu', err);
+    } catch {
+      // Non-fatal: stale message edits (e.g. after restart) should not crash the process
     }
   }
 
@@ -323,6 +271,7 @@ export class FeishuAdapter extends BaseChannelAdapter {
 
   isAuthorized(userId: string, _chatId: string): boolean {
     if (this.config.allowedUsers.length === 0) return true;
+    // userId may be user_id or open_id — match against either format in allowedUsers
     return this.config.allowedUsers.includes(userId);
   }
 }

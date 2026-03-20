@@ -65,9 +65,10 @@ async function downloadGoBinary() {
   const cpu = ARCH_MAP[arch()];
 
   if (!os || !cpu) {
-    console.warn(`Unsupported platform: ${platform()}-${arch()}. Skipping binary download.`);
-    console.warn('You can build from source: cd core && go build -o tlive ./cmd/tlive/');
-    return;
+    console.error(`Unsupported platform: ${platform()}-${arch()}.`);
+    console.error('You can build from source: cd core && go build -o tlive-core ./cmd/tlive/');
+    console.error(`Then copy the binary to ${BIN_DIR}/tlive-core`);
+    process.exit(1);
   }
 
   const ext = os === 'windows' ? '.exe' : '';
@@ -93,9 +94,10 @@ async function downloadGoBinary() {
     }
     console.log(`tlive-core installed to ${dest}`);
   } catch (err) {
-    console.warn(`Failed to download tlive-core: ${err.message}`);
-    console.warn('You can build from source: cd core && go build -o tlive-core ./cmd/tlive/');
-    console.warn(`Then copy the binary to ${dest}`);
+    console.error(`Failed to download tlive-core: ${err.message}`);
+    console.error('You can build from source: cd core && go build -o tlive-core ./cmd/tlive/');
+    console.error(`Then copy the binary to ${dest}`);
+    process.exit(1);
   }
 }
 

@@ -71,9 +71,14 @@ interface StreamState {
   lastAssistantText: string;
 }
 
+export type PermissionTimeoutCallback = (toolName: string, toolUseId: string) => void;
+
 export class ClaudeSDKProvider implements LLMProvider {
   private pendingPerms: PendingPermissions;
   private cliPath: string | undefined;
+
+  /** Called when a permission request times out — set by main.ts to send IM notifications */
+  onPermissionTimeout?: PermissionTimeoutCallback;
 
   constructor(pendingPerms: PendingPermissions) {
     this.pendingPerms = pendingPerms;
@@ -95,6 +100,7 @@ export class ClaudeSDKProvider implements LLMProvider {
   streamChat(params: StreamChatParams): ReadableStream<string> {
     const pendingPerms = this.pendingPerms;
     const cliPath = this.cliPath;
+    const onPermissionTimeout = this.onPermissionTimeout;
 
     return new ReadableStream({
       start(controller) {
@@ -134,7 +140,9 @@ export class ClaudeSDKProvider implements LLMProvider {
                   }),
                 );
 
-                const result = await pendingPerms.waitFor(opts.toolUseID);
+                const result = await pendingPerms.waitFor(opts.toolUseID, {
+                  onTimeout: () => onPermissionTimeout?.(toolName, opts.toolUseID),
+                });
 
                 if (result.behavior === 'allow') {
                   return { behavior: 'allow' as const, updatedInput: input };

@@ -13,4 +13,5 @@ export function resolveProvider(runtime: string, permissions: PendingPermissions
 }
 
 export { ClaudeSDKProvider } from './claude-sdk.js';
+export type { PermissionTimeoutCallback } from './claude-sdk.js';
 export type { LLMProvider, StreamChatParams } from './base.js';

@@ -3,7 +3,7 @@ import { initBridgeContext, type PermissionGateway, type CoreClient } from './co
 import { CoreClientImpl } from './core-client.js';
 import { Logger } from './logger.js';
 import { JsonFileStore } from './store/json-file.js';
-import { resolveProvider } from './providers/index.js';
+import { resolveProvider, ClaudeSDKProvider } from './providers/index.js';
 import { PendingPermissions } from './permissions/gateway.js';
 import { BridgeManager, type HookNotificationData } from './engine/bridge-manager.js';
 import { createAdapter } from './channels/index.js';
@@ -183,6 +183,20 @@ async function main() {
 
   await manager.start();
   logger.info('Bridge started');
+
+  // Wire permission timeout → IM notification
+  if (llm instanceof ClaudeSDKProvider) {
+    llm.onPermissionTimeout = (toolName: string, _toolUseId: string) => {
+      const text = `\u23f0 Permission timed out (5m)\nTool: ${toolName}\nAction: Denied by default`;
+      for (const adapter of manager.getAdapters()) {
+        const chatId = config.telegram.chatId || config.discord.allowedChannels[0] || '';
+        if (!chatId) continue;
+        adapter.send({ chatId, text }).catch((err) => {
+          logger.warn(`Failed to send timeout notification to ${adapter.channelType}: ${err}`);
+        });
+      }
+    };
+  }
 
   if (coreAvailable) {
     const webUrl = config.publicUrl || config.coreUrl;

@@ -225,8 +225,15 @@ export class BridgeManager {
         return true;
       }
 
-      // Regular permission broker callbacks
-      this.broker.handlePermissionCallback(msg.callbackData);
+      // Regular permission broker callbacks (perm:allow:ID, perm:deny:ID, perm:allow_session:ID)
+      const resolved = this.broker.handlePermissionCallback(msg.callbackData);
+      if (resolved) {
+        const action = msg.callbackData.split(':')[1];
+        const label = action === 'deny' ? '❌ Denied' : '✅ Allowed';
+        await adapter.send({ chatId: msg.chatId, text: label });
+      } else {
+        await adapter.send({ chatId: msg.chatId, text: '⚠️ Permission already expired or resolved' });
+      }
       return true;
     }
 

@@ -316,13 +316,24 @@ func runClient(lock daemon.LockInfo, args []string, rows, cols uint16) error {
 		}
 	}()
 
-	// WS -> stdout
+	// WS -> stdout (binary frames = PTY data, text frames = control messages)
 	go func() {
 		for {
-			_, msg, err := conn.ReadMessage()
+			msgType, msg, err := conn.ReadMessage()
 			if err != nil {
 				cancel()
 				return
+			}
+			if msgType == websocket.TextMessage {
+				// Control message (size, exit) — don't print to terminal
+				var ctrl struct {
+					Type string `json:"type"`
+					Code int    `json:"code"`
+				}
+				if json.Unmarshal(msg, &ctrl) == nil && ctrl.Type == "exit" {
+					cancel()
+				}
+				continue
 			}
 			os.Stdout.Write(msg)
 		}

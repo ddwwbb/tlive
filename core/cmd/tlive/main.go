@@ -27,8 +27,6 @@ func init() {
 	// Allow unknown flags to pass through to wrapped commands (e.g. tlive claude -r)
 	rootCmd.FParseErrWhitelist = cobra.FParseErrWhitelist{UnknownFlags: true}
 	rootCmd.AddCommand(stopCmd)
-	rootCmd.AddCommand(setupCmd)
-	rootCmd.AddCommand(installCmd)
 }
 
 func setupLogFile() *os.File {

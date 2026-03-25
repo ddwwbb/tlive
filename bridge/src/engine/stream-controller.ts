@@ -29,6 +29,7 @@ interface StreamControllerOptions {
   verboseLevel: VerboseLevel;
   platformLimit: number;
   throttleMs?: number;
+  minInitialChars?: number;
   flushCallback: (content: string, isEdit: boolean) => Promise<string | void>;
 }
 
@@ -44,6 +45,7 @@ export class StreamController {
   private flushing = false;
   private pendingFlush = false;
   private lastCostLine?: string;
+  private minInitialChars: number;
 
   get messageId(): string | undefined {
     return this._messageId;
@@ -53,6 +55,7 @@ export class StreamController {
     this.verboseLevel = options.verboseLevel;
     this.platformLimit = options.platformLimit;
     this.throttleMs = options.throttleMs ?? 300;
+    this.minInitialChars = options.minInitialChars ?? 50;
     this.flushCallback = options.flushCallback;
   }
 
@@ -96,6 +99,11 @@ export class StreamController {
     if (this.timer) return;
     this.timer = setTimeout(() => {
       this.timer = null;
+      // Debounce initial send: wait for enough content before creating the first message
+      if (!this._messageId && this.buffer.length < this.minInitialChars && this.verboseLevel > 0) {
+        this.scheduleFlush(); // reschedule
+        return;
+      }
       const content = this.compose();
       this.doFlush(content);
     }, this.throttleMs);

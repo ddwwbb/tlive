@@ -136,8 +136,20 @@ export class TelegramAdapter extends BaseChannelAdapter {
       for (let i = 0; i < chunks.length; i++) {
         const opts: TelegramBot.SendMessageOptions = { ...options };
         if (i < chunks.length - 1) delete opts.reply_markup;
-        const result = await this.bot.sendMessage(message.chatId, chunks[i], opts);
-        lastMessageId = String(result.message_id);
+        try {
+          const result = await this.bot.sendMessage(message.chatId, chunks[i], opts);
+          lastMessageId = String(result.message_id);
+        } catch (sendErr) {
+          // Parse-mode fallback: retry without HTML if formatting fails
+          if (opts.parse_mode && (sendErr as any)?.response?.statusCode === 400) {
+            const plainOpts = { ...opts };
+            delete plainOpts.parse_mode;
+            const result = await this.bot.sendMessage(message.chatId, chunks[i], plainOpts);
+            lastMessageId = String(result.message_id);
+          } else {
+            throw sendErr;
+          }
+        }
       }
     } catch (err) {
       throw classifyError('telegram', err);

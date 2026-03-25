@@ -15,10 +15,15 @@ function truncateInput(input: string, max = 300): string {
 }
 
 function makeButtons(permissionId: string): NonNullable<OutboundMessage['buttons']> {
+  // Telegram enforces 64-byte callback_data limit; longest pattern is "perm:allow_session:ID"
+  const maxIdBytes = 64 - Buffer.byteLength('perm:allow_session:', 'utf8');
+  const safeId = Buffer.byteLength(permissionId, 'utf8') > maxIdBytes
+    ? permissionId.slice(0, maxIdBytes)
+    : permissionId;
   return [
-    { label: '\u2705 Allow', callbackData: `perm:allow:${permissionId}`, style: 'primary' as const },
-    { label: '\uD83D\uDCCC Always', callbackData: `perm:allow_session:${permissionId}`, style: 'default' as const },
-    { label: '\u274C Deny', callbackData: `perm:deny:${permissionId}`, style: 'danger' as const },
+    { label: '\u2705 Allow', callbackData: `perm:allow:${safeId}`, style: 'primary' as const },
+    { label: '\uD83D\uDCCC Always', callbackData: `perm:allow_session:${safeId}`, style: 'default' as const },
+    { label: '\u274C Deny', callbackData: `perm:deny:${safeId}`, style: 'danger' as const },
   ];
 }
 

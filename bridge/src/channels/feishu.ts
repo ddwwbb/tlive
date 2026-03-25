@@ -202,19 +202,35 @@ export class FeishuAdapter extends BaseChannelAdapter {
     const raw = markdownToFeishu(message.text ?? message.html ?? '');
 
     try {
-      // Always use interactive card format so editMessage (patch) works for streaming updates
       const idType = message.receiveIdType || 'chat_id';
-      const result = await this.client.im.message.create({
-        params: { receive_id_type: idType },
-        data: {
-          receive_id: message.chatId,
-          msg_type: 'interactive',
-          content: this.buildCard(raw, message.buttons, message.feishuHeader),
-          ...(message.replyToMessageId ? { root_id: message.replyToMessageId } : {}),
-        },
-      });
+      const data: Record<string, unknown> = {
+        receive_id: message.chatId,
+        msg_type: 'interactive',
+        content: this.buildCard(raw, message.buttons, message.feishuHeader),
+      };
+      if (message.replyToMessageId) data.root_id = message.replyToMessageId;
 
-      const messageId = (result as FeishuCreateMessageResult)?.data?.message_id ?? '';
+      let result: FeishuCreateMessageResult;
+      try {
+        result = await this.client.im.message.create({
+          params: { receive_id_type: idType },
+          data,
+        }) as FeishuCreateMessageResult;
+      } catch (createErr) {
+        // Reply target withdrawn/deleted — retry without root_id
+        const code = (createErr as any)?.code;
+        if (message.replyToMessageId && (code === 230011 || code === 231003)) {
+          delete data.root_id;
+          result = await this.client.im.message.create({
+            params: { receive_id_type: idType },
+            data,
+          }) as FeishuCreateMessageResult;
+        } else {
+          throw createErr;
+        }
+      }
+
+      const messageId = result?.data?.message_id ?? '';
       return { messageId: String(messageId), success: true };
     } catch (err) {
       throw classifyError('feishu', err);

@@ -1,6 +1,6 @@
 import type { BaseChannelAdapter } from '../channels/base.js';
 import type { OutboundMessage } from '../channels/types.js';
-import { BridgeError } from '../channels/errors.js';
+import { BridgeError, RateLimitError } from '../channels/errors.js';
 import { ChatRateLimiter } from './rate-limiter.js';
 
 interface DeliveryOptions {
@@ -9,7 +9,7 @@ interface DeliveryOptions {
   interChunkDelayMs?: number;
 }
 
-export function chunkMarkdown(text: string, limit: number): string[] {
+export function chunkMarkdown(text: string, limit: number, maxLines?: number): string[] {
   if (text.length <= limit) return [text];
 
   const chunks: string[] = [];
@@ -34,7 +34,9 @@ export function chunkMarkdown(text: string, limit: number): string[] {
 
     const separator = current ? '\n' : '';
     const addition = separator + line;
-    const wouldExceed = current.length + addition.length + (inCodeBlock ? 4 : 0) > limit;
+    const lineCount = current.split('\n').length;
+    const wouldExceed = current.length + addition.length + (inCodeBlock ? 4 : 0) > limit
+      || (maxLines && lineCount >= maxLines && current.length > 0);
 
     if (wouldExceed && current) {
       flush();
@@ -135,7 +137,10 @@ export class DeliveryLayer {
         // Don't retry non-retryable errors
         if (err instanceof BridgeError && !err.retryable) throw err;
         if (attempt < maxRetries - 1) {
-          const delay = Math.min(1000 * Math.pow(2, attempt), 10_000);
+          const baseDelay = Math.min(1000 * Math.pow(2, attempt), 10_000);
+          const delay = (err instanceof RateLimitError && err.retryAfterMs > 0)
+            ? Math.max(err.retryAfterMs, baseDelay)
+            : baseDelay;
           await new Promise(r => setTimeout(r, delay));
         }
       }

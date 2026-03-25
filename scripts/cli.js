@@ -189,6 +189,19 @@ switch (command) {
       }
       console.log(`Hook scripts installed: ${binDir}`);
 
+      // Sync reference docs to ~/.tlive/docs/
+      const docsDir = join(homedir(), '.tlive', 'docs');
+      mkdirSync(docsDir, { recursive: true });
+      const refsDir = join(PACKAGE_ROOT, 'references');
+      for (const doc of ['setup-guides.md', 'token-validation.md', 'troubleshooting.md']) {
+        const src = join(refsDir, doc);
+        const dest = join(docsDir, doc);
+        if (existsSync(src)) {
+          copyFileSync(src, dest);
+        }
+      }
+      console.log(`Reference docs synced: ${docsDir}`);
+
       // Auto-configure hooks in ~/.claude/settings.json
       if (target === 'claude') {
         const settingsPath = join(homedir(), '.claude', 'settings.json');

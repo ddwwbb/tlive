@@ -56,6 +56,22 @@ function copyHookScripts() {
   console.log(`Hook scripts installed to ${BIN_DIR}`);
 }
 
+function copyReferenceDocs() {
+  const docsDir = join(homedir(), '.tlive', 'docs');
+  mkdirSync(docsDir, { recursive: true });
+
+  const refsDir = join(__dirname, '..', 'references');
+  const docs = ['setup-guides.md', 'token-validation.md', 'troubleshooting.md'];
+  for (const doc of docs) {
+    const src = join(refsDir, doc);
+    const dest = join(docsDir, doc);
+    if (existsSync(src)) {
+      copyFileSync(src, dest);
+    }
+  }
+  console.log(`Reference docs installed to ${docsDir}`);
+}
+
 async function downloadGoBinary() {
   const os = PLATFORM_MAP[platform()];
   const cpu = ARCH_MAP[arch()];
@@ -104,8 +120,12 @@ async function downloadGoBinary() {
 async function main() {
   console.log('Setting up TLive...');
   copyHookScripts();
+  copyReferenceDocs();
   await downloadGoBinary();
-  console.log('TLive setup complete.');
+  console.log('\nTLive setup complete.');
+  console.log('Next steps:');
+  console.log('  1. tlive setup              — configure IM platforms');
+  console.log('  2. tlive install skills      — integrate with Claude Code');
 }
 
 main().catch(console.error);

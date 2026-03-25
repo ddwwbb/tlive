@@ -24,6 +24,8 @@ export interface OutboundMessage {
   html?: string;
   buttons?: Button[];
   replyToMessageId?: string;
+  /** Feishu: override receive_id_type (default 'chat_id', can be 'open_id' for P2P) */
+  receiveIdType?: string;
 }
 
 export interface SendResult {

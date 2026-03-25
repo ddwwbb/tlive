@@ -75,6 +75,8 @@ export class BridgeManager {
     return this.lastChatId.get(channelType) ?? '';
   }
 
+
+
   registerAdapter(adapter: BaseChannelAdapter): void {
     this.adapters.set(adapter.channelType, adapter);
   }
@@ -152,7 +154,7 @@ export class BridgeManager {
   }
 
   /** Send a hook notification to IM with [Local] prefix and track for reply routing */
-  async sendHookNotification(adapter: BaseChannelAdapter, chatId: string, hook: HookNotificationData): Promise<void> {
+  async sendHookNotification(adapter: BaseChannelAdapter, chatId: string, hook: HookNotificationData, receiveIdType?: string): Promise<void> {
     const hookType = hook.tlive_hook_type || '';
     const parts: string[] = [];
 
@@ -176,13 +178,14 @@ export class BridgeManager {
     if (this.coreAvailable && hook.tlive_session_id) {
       const config = loadConfig();
       const baseUrl = config.publicUrl || `http://localhost:${config.port || 8080}`;
-      parts.push('', `🔗 ${baseUrl}/terminal.html?id=${hook.tlive_session_id}&token=${this.token}`);
+      const url = `${baseUrl}/terminal.html?id=${hook.tlive_session_id}&token=${this.token}`;
+      parts.push('', `🔗 [Open Terminal](${url})`);
     }
 
     const raw = parts.join('\n');
     const outMsg = adapter.channelType === 'telegram'
       ? { chatId, html: markdownToTelegram(raw) }
-      : { chatId, text: raw };
+      : { chatId, text: raw, receiveIdType };
     const result = await adapter.send(outMsg);
     this.trackHookMessage(result.messageId, hook.tlive_session_id || '');
   }

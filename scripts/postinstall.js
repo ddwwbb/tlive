@@ -7,7 +7,7 @@ import { homedir, platform, arch } from 'node:os';
 import { get } from 'node:https';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const GITHUB_REPO = 'y49/TermLive';
+const GITHUB_REPO = 'y49/tlive';
 const BIN_DIR = join(homedir(), '.tlive', 'bin');
 
 const PLATFORM_MAP = { linux: 'linux', darwin: 'darwin', win32: 'windows' };

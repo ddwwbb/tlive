@@ -23,7 +23,7 @@ esac
 echo "Platform: ${OS}-${ARCH}"
 
 # 2. Download Go Core binary
-GITHUB_REPO="y49/TermLive"
+GITHUB_REPO="y49/tlive"
 VERSION=$(curl -sf https://api.github.com/repos/${GITHUB_REPO}/releases/latest | grep -o '"tag_name": "[^"]*"' | cut -d'"' -f4 || echo "latest")
 
 BINARY_URL="https://github.com/${GITHUB_REPO}/releases/download/${VERSION}/tlive-${OS}-${ARCH}"

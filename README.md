@@ -1,23 +1,47 @@
-# TLive
+# tlive
+
+[![npm version](https://img.shields.io/npm/v/tlive)](https://www.npmjs.com/package/tlive)
+[![CI](https://github.com/y49/tlive/actions/workflows/ci.yml/badge.svg)](https://github.com/y49/tlive/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 [中文文档](README_CN.md)
 
-Terminal live monitoring + IM bridge for AI coding tools.
+**Terminal Live** — monitor and chat with AI coding agents (Claude Code, Codex) from Telegram, Discord & Feishu.
 
 Three features, use any combination:
-- **`tlive <cmd>`** — wrap any command with a web-accessible terminal
-- **`/tlive`** — chat with Claude Code / Codex from Telegram, Discord, or Feishu
-- **Hook Approval** — approve Claude Code tool permissions from your phone
 
-## Install
+| Feature | What it does | Access from |
+|---------|-------------|-------------|
+| **Web Terminal** | `tlive <cmd>` — wrap any command with a web-accessible terminal | Browser / Phone |
+| **IM Bridge** | `/tlive` — chat with Claude Code from your phone | Telegram / Discord / Feishu |
+| **Hook Approval** | Approve Claude Code permissions from your phone | Telegram / Discord / Feishu |
+
+<!-- TODO: Add hero screenshot/GIF here -->
+<!-- ![tlive demo](docs/images/demo.gif) -->
+
+## Quick Start
 
 ```bash
+# 1. Install
 npm install -g tlive
+
+# 2. Configure your IM platform (interactive wizard)
+tlive setup
+
+# 3. Register hooks + Claude Code skill
+tlive install skills
+
+# 4. In Claude Code, start the bridge
+/tlive
 ```
 
-## Feature 1: Web Terminal
+> **Recommended:** Run `/tlive setup` inside Claude Code for an AI-guided setup experience that walks you through each step.
 
-Wrap any long-running command. Access the terminal from your phone's browser.
+Platform setup guides: [Telegram](docs/setup-telegram.md) · [Discord](docs/setup-discord.md) · [Feishu](docs/setup-feishu.md) · [Full Getting Started Guide](docs/getting-started.md)
+
+## Web Terminal
+
+Wrap any long-running command. Access from your phone's browser.
 
 ```bash
 tlive claude                  # Wrap Claude Code
@@ -36,17 +60,12 @@ $ tlive claude --model opus
 
 Multiple sessions in one dashboard. Daemon auto-starts, auto-shuts down after 15 minutes idle.
 
-## Feature 2: IM Bridge
+<!-- TODO: Add web terminal screenshot -->
+<!-- ![Web Terminal](docs/images/web-terminal.png) -->
+
+## IM Bridge
 
 Chat with Claude Code from your phone. Start new tasks, get streaming responses with real-time tool visibility.
-
-```bash
-tlive setup                   # Configure IM platforms
-tlive install skills --claude  # Install to Claude Code
-
-# Then in Claude Code:
-/tlive                        # Start Bridge
-```
 
 ```
 You (Telegram):  "Fix the login bug in auth.ts"
@@ -61,23 +80,22 @@ TLive (TG):      ✅ Task Complete
                   📊 12.3k/8.1k tok | $0.08 | 2m 34s
 ```
 
-**Verbose levels:** Control how much detail you see with `/verbose 0|1|2` (quiet/normal/detailed).
+**Verbose levels:** `/verbose 0|1|2` — quiet (final answer only) / normal (tool names) / detailed (tool names + inputs).
 
-## Feature 3: Hook Approval (Killer Feature)
+<!-- TODO: Add IM bridge screenshot -->
+<!-- ![IM Bridge](docs/images/im-bridge.png) -->
+
+## Hook Approval
 
 Approve Claude Code tool permissions from your phone. Never get blocked by a `[y/N]` prompt again.
 
-**How it works:**
-
 ```
-You run Claude Code in terminal (normal usage, no wrapper needed)
+Claude Code runs normally in your terminal (no wrapper needed)
   │
-  ├── Claude wants to edit a file
-  │   → PreToolUse Hook fires
-  │   → Go Core receives, holds request
-  │   → Bridge polls, sends to Telegram:
+  ├── Claude wants to run a command
+  │   → Hook fires → Go Core receives → Bridge sends to your phone:
   │
-  │   🔒 Permission Required (Local Claude Code)
+  │   🔒 Permission Required
   │   Tool: Bash
   │   ┌──────────────────────────┐
   │   │ rm -rf node_modules &&   │
@@ -85,87 +103,34 @@ You run Claude Code in terminal (normal usage, no wrapper needed)
   │   └──────────────────────────┘
   │   [✅ Allow]  [❌ Deny]
   │
-  ├── You tap [Allow] on phone
-  │   → Bridge resolves → Go Core returns
-  │   → Claude Code continues
+  ├── You tap [Allow] → Claude Code continues
   │
-  └── You walk away. Claude keeps working.
+  └── Walk away. Claude keeps working.
       Phone buzzes only when approval needed.
 ```
 
-**Setup (one-time):**
-
-```bash
-# 1. Start Go Core (receives hooks)
-tlive setup
-
-# 2. Add hooks to Claude Code settings
-# ~/.claude/settings.json
-{
-  "hooks": {
-    "PreToolUse": [{
-      "type": "command",
-      "command": "~/.tlive/bin/hook-handler.sh",
-      "timeout": 300000
-    }],
-    "Notification": [{
-      "type": "command",
-      "command": "~/.tlive/bin/notify-handler.sh",
-      "timeout": 5000
-    }]
-  }
-}
-```
-
 **Safe by design:**
-- Hook script checks if Go Core is running — if not, passes through (zero impact)
-- Timeout defaults to **deny** (not allow) — security first
+- Timeout defaults to **deny** (not allow)
 - Shows exact tool name and command before you approve
+- Hook script checks if Go Core is running — if not, passes through (zero impact on normal usage)
 - Works with any Claude Code session, no wrapper needed
 
 **Pause when you're at your desk:**
 
 ```bash
-tlive hooks pause              # Auto-allow everything, no notifications
-tlive hooks resume             # Back to normal IM approval
+tlive hooks pause              # Auto-allow everything
+tlive hooks resume             # Back to IM approval
 ```
 
-Or from your phone: send `/hooks pause` or `/hooks resume` in IM.
-
-## How the Three Features Relate
-
-```
-┌─ Feature 1: Web Terminal ──────┐
-│ tlive claude                    │
-│ → PTY + Web UI + QR code       │
-│ Access: browser                 │
-└─────────────────────────────────┘
-
-┌─ Feature 2: IM Bridge ─────────┐
-│ /tlive (Claude Code skill)     │
-│ → Agent SDK + Telegram/Discord │
-│ → New tasks from phone         │
-│ Access: IM app                  │
-└─────────────────────────────────┘
-
-┌─ Feature 3: Hook Approval ─────┐
-│ Claude Code hooks → Go Core    │
-│ → Bridge polls → IM buttons    │
-│ → Approve existing tasks       │
-│ Access: IM app                  │
-└─────────────────────────────────┘
-
-Features 2 & 3 need Go Core running.
-Bridge detects Go Core → IM messages include web terminal link.
-Each feature works independently.
-```
+<!-- TODO: Add hook approval screenshot -->
+<!-- ![Hook Approval](docs/images/hook-approval.png) -->
 
 ## Supported Platforms
 
 | | Telegram | Discord | Feishu |
 |---|----------|---------|--------|
-| IM Bridge (Feature 2) | ✅ | ✅ | ✅ |
-| Hook Approval (Feature 3) | ✅ | ✅ | ✅ |
+| IM Bridge | ✅ | ✅ | ✅ |
+| Hook Approval | ✅ | ✅ | ✅ |
 | Streaming responses | Edit-based | Edit-based | CardKit v2 |
 | Tool visibility | ✅ | ✅ | ✅ |
 | Typing indicator | ✅ | ✅ | — |
@@ -176,25 +141,29 @@ Each feature works independently.
 ### CLI
 
 ```bash
-tlive <cmd>                # Web terminal (Feature 1)
-tlive stop                 # Stop daemon
+tlive <cmd>                # Web terminal
 tlive setup                # Configure IM platforms
-tlive install skills       # Install to Claude Code / Codex
+tlive install skills       # Register hooks + Claude Code skill
+tlive start                # Start Bridge daemon
+tlive stop                 # Stop daemon
+tlive status               # Check status
+tlive logs [N]             # Show last N lines of bridge log
+tlive doctor               # Run diagnostics
 tlive hooks                # Show hook status
-tlive hooks pause           # Pause hooks (auto-allow)
-tlive hooks resume          # Resume hooks (IM approval)
+tlive hooks pause          # Pause hooks (auto-allow)
+tlive hooks resume         # Resume hooks (IM approval)
 ```
 
 ### Claude Code Skill
 
 ```
-/tlive                     # Start IM Bridge (Feature 2)
-/tlive setup               # Configure IM
+/tlive                     # Start IM Bridge
+/tlive setup               # AI-guided configuration
 /tlive stop                # Stop Bridge
 /tlive status              # Check status
 /tlive doctor              # Diagnostics
 
-/verbose 0|1|2             # Set detail level (quiet/normal/detailed)
+/verbose 0|1|2             # Set detail level
 /new                       # Start new conversation
 /hooks pause|resume        # Toggle hook approval
 ```
@@ -212,11 +181,12 @@ TL_PUBLIC_URL=https://example.com
 TL_ENABLED_CHANNELS=telegram,discord
 TL_TG_BOT_TOKEN=...
 TL_TG_CHAT_ID=...
-TL_TG_ALLOWED_USERS=...
 TL_DC_BOT_TOKEN=...
 TL_FS_APP_ID=...
 TL_FS_APP_SECRET=...
 ```
+
+See [config.env.example](config.env.example) for all options.
 
 ## Architecture
 

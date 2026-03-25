@@ -81,6 +81,7 @@ export class FeishuAdapter extends BaseChannelAdapter {
             channelType: 'feishu',
             chatId: msg.chat_id,
             userId,
+
             text,
             messageId: msg.message_id,
             replyToMessageId: msg.parent_id || msg.root_id || undefined,
@@ -112,6 +113,7 @@ export class FeishuAdapter extends BaseChannelAdapter {
               channelType: 'feishu',
               chatId: msg.chat_id,
               userId,
+  
               text: '',
               messageId: msg.message_id,
               replyToMessageId: msg.parent_id || msg.root_id || undefined,
@@ -145,6 +147,7 @@ export class FeishuAdapter extends BaseChannelAdapter {
               channelType: 'feishu',
               chatId: msg.chat_id,
               userId,
+  
               text: '',
               messageId: msg.message_id,
               replyToMessageId: msg.parent_id || msg.root_id || undefined,
@@ -208,8 +211,9 @@ export class FeishuAdapter extends BaseChannelAdapter {
 
     try {
       // Always use interactive card format so editMessage (patch) works for streaming updates
+      const idType = message.receiveIdType || 'chat_id';
       const result = await this.client.im.message.create({
-        params: { receive_id_type: 'chat_id' },
+        params: { receive_id_type: idType },
         data: {
           receive_id: message.chatId,
           msg_type: 'interactive',

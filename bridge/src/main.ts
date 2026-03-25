@@ -81,6 +81,25 @@ function formatPermissionCard(toolName: string, input: unknown): string {
   return parts.join('');
 }
 
+/** Resolve hook notification target per channel type.
+ *  Feishu: prefer allowedUsers[0] via user_id (always routes to P2P chat).
+ *  Telegram/Discord: use configured chatId/channelId. */
+function getHookTarget(channelType: string, config: ReturnType<typeof loadConfig>, manager: BridgeManager) {
+  if (channelType === 'telegram') {
+    return { chatId: config.telegram.chatId, receiveIdType: undefined };
+  }
+  if (channelType === 'discord') {
+    return { chatId: config.discord.allowedChannels[0] || '', receiveIdType: undefined };
+  }
+  // Feishu: send to user directly (P2P) if allowedUsers configured
+  const userId = config.feishu.allowedUsers[0];
+  if (userId) {
+    const idType = userId.startsWith('ou_') ? 'open_id' : 'user_id';
+    return { chatId: userId, receiveIdType: idType };
+  }
+  return { chatId: manager.getLastChatId(channelType), receiveIdType: undefined };
+}
+
 // Whether Go Core daemon is reachable (for web terminal links in IM)
 let coreAvailable = false;
 let coreClient: CoreClientImpl | null = null;
@@ -189,12 +208,9 @@ async function main() {
     llm.onPermissionTimeout = (toolName: string, _toolUseId: string) => {
       const text = `\u23f0 Permission timed out (5m)\nTool: ${toolName}\nAction: Denied by default`;
       for (const adapter of manager.getAdapters()) {
-        let chatId = '';
-        if (adapter.channelType === 'telegram') chatId = config.telegram.chatId;
-        else if (adapter.channelType === 'discord') chatId = config.discord.allowedChannels[0] || '';
-        else chatId = manager.getLastChatId(adapter.channelType);
-        if (!chatId) continue;
-        adapter.send({ chatId, text }).catch((err) => {
+        const target = getHookTarget(adapter.channelType, config, manager);
+        if (!target.chatId) continue;
+        adapter.send({ chatId: target.chatId, receiveIdType: target.receiveIdType, text }).catch((err) => {
           logger.warn(`Failed to send timeout notification to ${adapter.channelType}: ${err}`);
         });
       }
@@ -244,17 +260,15 @@ async function main() {
 
         // Send to all active IM adapters
         for (const adapter of manager.getAdapters()) {
-          let chatId = '';
-          if (adapter.channelType === 'telegram') chatId = config.telegram.chatId;
-          else if (adapter.channelType === 'discord') chatId = config.discord.allowedChannels[0] || '';
-          else chatId = manager.getLastChatId(adapter.channelType);
-          if (!chatId) continue;
+          const target = getHookTarget(adapter.channelType, config, manager);
+          if (!target.chatId) continue;
 
           try {
             // Feishu WSClient doesn't support card action callbacks — use text-based approval
             const useTextApproval = adapter.channelType === 'feishu';
             const sendResult = await adapter.send({
-              chatId,
+              chatId: target.chatId,
+              receiveIdType: target.receiveIdType,
               text: useTextApproval ? text + '\n\n💬 回复 **allow** 或 **deny**' : text,
               buttons: useTextApproval ? undefined : buttons,
             });
@@ -305,13 +319,10 @@ async function main() {
         if (!hookData.tlive_hook_type) continue;
 
         for (const adapter of manager.getAdapters()) {
-          let chatId = '';
-          if (adapter.channelType === 'telegram') chatId = config.telegram.chatId;
-          else if (adapter.channelType === 'discord') chatId = config.discord.allowedChannels[0] || '';
-          else chatId = manager.getLastChatId(adapter.channelType);
-          if (!chatId) continue;
+          const target = getHookTarget(adapter.channelType, config, manager);
+          if (!target.chatId) continue;
           try {
-            await manager.sendHookNotification(adapter, chatId, hookData);
+            await manager.sendHookNotification(adapter, target.chatId, hookData, target.receiveIdType);
           } catch (err) {
             logger.warn(`Failed to send notification to ${adapter.channelType}: ${err}`);
           }

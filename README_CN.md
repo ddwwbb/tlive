@@ -1,21 +1,45 @@
-# TLive
+# tlive
+
+[![npm version](https://img.shields.io/npm/v/tlive)](https://www.npmjs.com/package/tlive)
+[![CI](https://github.com/y49/tlive/actions/workflows/ci.yml/badge.svg)](https://github.com/y49/tlive/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 [English](README.md)
 
-终端实时监控 + AI 编码工具 IM 桥接。
+**Terminal Live** — 从 Telegram、Discord、飞书监控和操控 AI 编码工具（Claude Code、Codex）。
 
-三大功能，按需组合使用：
-- **`tlive <cmd>`** — 包装任何命令，手机浏览器访问终端
-- **`/tlive`** — 从 Telegram、Discord、飞书与 Claude Code / Codex 双向交互
-- **Hook 审批** — 在手机上审批 Claude Code 工具权限
+三大功能，按需组合：
 
-## 安装
+| 功能 | 说明 | 访问方式 |
+|------|------|---------|
+| **Web 终端** | `tlive <cmd>` — 包装任何命令，手机浏览器访问 | 浏览器 / 手机 |
+| **IM 桥接** | `/tlive` — 在手机上与 Claude Code 双向对话 | Telegram / Discord / 飞书 |
+| **Hook 审批** | 在手机上审批 Claude Code 工具权限 | Telegram / Discord / 飞书 |
+
+<!-- TODO: 添加演示截图/GIF -->
+<!-- ![tlive 演示](docs/images/demo.gif) -->
+
+## 快速开始
 
 ```bash
+# 1. 安装
 npm install -g tlive
+
+# 2. 配置 IM 平台（交互式引导）
+tlive setup
+
+# 3. 注册 hooks + Claude Code 技能
+tlive install skills
+
+# 4. 在 Claude Code 中启动桥接
+/tlive
 ```
 
-## 功能 1：Web 终端
+> **推荐：** 在 Claude Code 中运行 `/tlive setup`，AI 会一步步引导你完成配置。
+
+平台配置指南：[Telegram](docs/setup-telegram-cn.md) · [Discord](docs/setup-discord-cn.md) · [飞书](docs/setup-feishu-cn.md) · [完整入门指南](docs/getting-started-cn.md)
+
+## Web 终端
 
 包装长时间运行的命令，手机浏览器远程访问。
 
@@ -36,17 +60,12 @@ $ tlive claude --model opus
 
 多会话共享仪表盘。Daemon 自动启动，空闲 15 分钟自动退出。
 
-## 功能 2：IM 桥接
+<!-- TODO: 添加 Web 终端截图 -->
+<!-- ![Web 终端](docs/images/web-terminal.png) -->
+
+## IM 桥接
 
 手机上与 Claude Code 对话。发起新任务，获取实时流式响应和工具可视化。
-
-```bash
-tlive setup                   # 配置 IM 平台
-tlive install skills --claude  # 安装到 Claude Code
-
-# 在 Claude Code 中：
-/tlive                        # 启动 Bridge
-```
 
 ```
 你 (Telegram):    "修复 auth.ts 里的登录 bug"
@@ -61,23 +80,22 @@ TLive (TG):       ✅ 任务完成
                    📊 12.3k/8.1k tok | $0.08 | 2m 34s
 ```
 
-**详细度控制：** 发送 `/verbose 0|1|2` 切换显示级别（安静/正常/详细）。
+**详细度控制：** `/verbose 0|1|2` — 安静（仅最终回复）/ 正常（工具名称）/ 详细（工具名称 + 输入参数）。
 
-## 功能 3：Hook 审批（杀手级功能）
+<!-- TODO: 添加 IM 桥接截图 -->
+<!-- ![IM 桥接](docs/images/im-bridge.png) -->
+
+## Hook 审批
 
 在手机上审批 Claude Code 工具权限。再也不会被 `[y/N]` 提示卡住。
-
-**工作原理：**
 
 ```
 你在终端正常运行 Claude Code（不需要任何包装）
   │
-  ├── Claude 想编辑一个文件
-  │   → PreToolUse Hook 触发
-  │   → Go Core 接收，挂起请求
-  │   → Bridge 轮询，发送到 Telegram：
+  ├── Claude 想执行一个命令
+  │   → Hook 触发 → Go Core 接收 → Bridge 发送到手机：
   │
-  │   🔒 需要权限 (本地 Claude Code)
+  │   🔒 需要权限
   │   工具: Bash
   │   ┌──────────────────────────┐
   │   │ rm -rf node_modules &&   │
@@ -85,87 +103,34 @@ TLive (TG):       ✅ 任务完成
   │   └──────────────────────────┘
   │   [✅ 允许]  [❌ 拒绝]
   │
-  ├── 你在手机上点 [允许]
-  │   → Bridge 解析 → Go Core 返回
-  │   → Claude Code 继续执行
+  ├── 你点 [允许] → Claude Code 继续执行
   │
-  └── 你离开电脑。Claude 继续工作。
+  └── 离开电脑。Claude 继续工作。
       只有需要审批时手机才会响。
 ```
 
-**配置（一次性）：**
-
-```bash
-# 1. 启动 Go Core（接收 hooks）
-tlive setup
-
-# 2. 添加 hooks 到 Claude Code 设置
-# ~/.claude/settings.json
-{
-  "hooks": {
-    "PreToolUse": [{
-      "type": "command",
-      "command": "~/.tlive/bin/hook-handler.sh",
-      "timeout": 300000
-    }],
-    "Notification": [{
-      "type": "command",
-      "command": "~/.tlive/bin/notify-handler.sh",
-      "timeout": 5000
-    }]
-  }
-}
-```
-
 **安全设计：**
-- Hook 脚本先检查 Go Core 是否运行 — 没运行则直接放行（零影响）
-- 超时默认**拒绝**（不是允许）— 安全第一
+- 超时默认**拒绝**（不是允许）
 - 审批前显示具体工具名和命令内容
+- Hook 脚本先检查 Go Core 是否运行 — 没运行则直接放行（零影响）
 - 适用于任何 Claude Code 会话，不需要包装器
 
-**坐在电脑旁时暂停通知：**
+**坐在电脑旁时暂停：**
 
 ```bash
-tlive hooks pause              # 自动放行，不发通知
+tlive hooks pause              # 自动放行
 tlive hooks resume             # 恢复 IM 审批
 ```
 
-或在手机上发送 `/hooks pause` 或 `/hooks resume`。
-
-## 三个功能的关系
-
-```
-┌─ 功能 1: Web 终端 ─────────────┐
-│ tlive claude                    │
-│ → PTY + Web UI + QR 码          │
-│ 访问方式：浏览器                  │
-└─────────────────────────────────┘
-
-┌─ 功能 2: IM 桥接 ──────────────┐
-│ /tlive (Claude Code 技能)       │
-│ → Agent SDK + Telegram/Discord  │
-│ → 手机发起新任务                  │
-│ 访问方式：IM 应用                 │
-└─────────────────────────────────┘
-
-┌─ 功能 3: Hook 审批 ────────────┐
-│ Claude Code hooks → Go Core     │
-│ → Bridge 轮询 → IM 按钮         │
-│ → 审批已有任务                    │
-│ 访问方式：IM 应用                 │
-└─────────────────────────────────┘
-
-功能 2 和 3 需要 Go Core 运行。
-Bridge 检测到 Go Core → IM 消息带 Web 终端链接。
-每个功能独立工作。
-```
+<!-- TODO: 添加 Hook 审批截图 -->
+<!-- ![Hook 审批](docs/images/hook-approval.png) -->
 
 ## 支持平台
 
 | | Telegram | Discord | 飞书 |
 |---|----------|---------|------|
-| IM 桥接（功能 2） | ✅ | ✅ | ✅ |
-| Hook 审批（功能 3） | ✅ | ✅ | ✅ |
+| IM 桥接 | ✅ | ✅ | ✅ |
+| Hook 审批 | ✅ | ✅ | ✅ |
 | 流式响应 | 编辑消息 | 编辑消息 | CardKit v2 |
 | 工具可视化 | ✅ | ✅ | ✅ |
 | 输入状态 | ✅ | ✅ | — |
@@ -176,25 +141,29 @@ Bridge 检测到 Go Core → IM 消息带 Web 终端链接。
 ### CLI
 
 ```bash
-tlive <cmd>                # Web 终端（功能 1）
-tlive stop                 # 停止 daemon
+tlive <cmd>                # Web 终端
 tlive setup                # 配置 IM 平台
-tlive install skills       # 安装到 Claude Code / Codex
+tlive install skills       # 注册 hooks + Claude Code 技能
+tlive start                # 启动 Bridge 守护进程
+tlive stop                 # 停止守护进程
+tlive status               # 查看状态
+tlive logs [N]             # 查看最近 N 行日志
+tlive doctor               # 运行诊断
 tlive hooks                # 查看 Hook 状态
-tlive hooks pause           # 暂停 Hook（自动放行）
-tlive hooks resume          # 恢复 Hook（IM 审批）
+tlive hooks pause          # 暂停 Hook（自动放行）
+tlive hooks resume         # 恢复 Hook（IM 审批）
 ```
 
 ### Claude Code 技能
 
 ```
-/tlive                     # 启动 IM Bridge（功能 2）
-/tlive setup               # 配置 IM
+/tlive                     # 启动 IM Bridge
+/tlive setup               # AI 引导配置
 /tlive stop                # 停止 Bridge
 /tlive status              # 查看状态
 /tlive doctor              # 诊断
 
-/verbose 0|1|2             # 设置详细度（安静/正常/详细）
+/verbose 0|1|2             # 设置详细度
 /new                       # 开始新对话
 /hooks pause|resume        # 切换 Hook 审批
 ```
@@ -212,11 +181,12 @@ TL_PUBLIC_URL=https://example.com
 TL_ENABLED_CHANNELS=telegram,discord
 TL_TG_BOT_TOKEN=...
 TL_TG_CHAT_ID=...
-TL_TG_ALLOWED_USERS=...
 TL_DC_BOT_TOKEN=...
 TL_FS_APP_ID=...
 TL_FS_APP_SECRET=...
 ```
+
+完整配置项参见 [config.env.example](config.env.example)。
 
 ## 架构
 

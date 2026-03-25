@@ -365,6 +365,15 @@ export class BridgeManager {
     const costTracker = new CostTracker();
     costTracker.start();
 
+    // Add processing reaction
+    const reactionEmojis: Record<string, { processing: string; done: string; error: string }> = {
+      telegram: { processing: '\u{1F914}', done: '\u{1F44D}', error: '\u{1F631}' },
+      feishu: { processing: 'THUMBSUP', done: 'OK', error: 'FACEPALM' },
+      discord: { processing: '\u{1F914}', done: '\u{1F44D}', error: '\u{274C}' },
+    };
+    const reactions = reactionEmojis[adapter.channelType] || reactionEmojis.telegram;
+    adapter.addReaction(msg.chatId, msg.messageId, reactions.processing).catch(() => {});
+
     const platformLimits: Record<string, number> = { telegram: 4096, discord: 2000, feishu: 30000 };
     const stream = new StreamController({
       verboseLevel,
@@ -424,6 +433,12 @@ export class BridgeManager {
           platformLimit: platformLimits[adapter.channelType] ?? 4096,
         });
       }
+      // Success: change to done reaction
+      adapter.addReaction(msg.chatId, msg.messageId, reactions.done).catch(() => {});
+    } catch (err) {
+      // Error: change to error reaction
+      adapter.addReaction(msg.chatId, msg.messageId, reactions.error).catch(() => {});
+      throw err;
     } finally {
       clearInterval(typingInterval);
       stream.dispose();

@@ -13,6 +13,8 @@ function mockAdapter(channelType = 'telegram'): BaseChannelAdapter {
     send: vi.fn().mockResolvedValue({ messageId: '1', success: true }),
     editMessage: vi.fn(),
     sendTyping: vi.fn().mockResolvedValue(undefined),
+    addReaction: vi.fn().mockResolvedValue(undefined),
+    removeReaction: vi.fn().mockResolvedValue(undefined),
     validateConfig: vi.fn().mockReturnValue(null),
     isAuthorized: vi.fn().mockReturnValue(true),
     _pushMessage: (msg: any) => messageQueue.push(msg),

@@ -181,6 +181,33 @@ export class TelegramAdapter extends BaseChannelAdapter {
     }
   }
 
+  async addReaction(_chatId: string, messageId: string, emoji: string): Promise<void> {
+    if (!this.bot) return;
+    try {
+      // Use setMessageReaction API (Bot API 7.2+)
+      await (this.bot as any).setMessageReaction(
+        _chatId,
+        parseInt(messageId, 10),
+        { reaction: [{ type: 'emoji', emoji }] }
+      );
+    } catch {
+      // Non-fatal: reaction API may not be available (older bot API)
+    }
+  }
+
+  async removeReaction(_chatId: string, messageId: string): Promise<void> {
+    if (!this.bot) return;
+    try {
+      await (this.bot as any).setMessageReaction(
+        _chatId,
+        parseInt(messageId, 10),
+        { reaction: [] }
+      );
+    } catch {
+      // Non-fatal
+    }
+  }
+
   validateConfig(): string | null {
     if (!this.config.botToken) return 'TL_TG_BOT_TOKEN is required for Telegram';
     return null;

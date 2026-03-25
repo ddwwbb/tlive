@@ -254,7 +254,40 @@ export class FeishuAdapter extends BaseChannelAdapter {
   }
 
   async sendTyping(_chatId: string): Promise<void> {
-    // Feishu has no native typing API; streaming card updates serve this purpose
+    // Feishu has no native typing API; reactions are used instead
+    // (handled by bridge-manager via addReaction)
+  }
+
+  private reactionIds = new Map<string, string>();
+
+  async addReaction(_chatId: string, messageId: string, emoji: string): Promise<void> {
+    if (!this.client) return;
+    try {
+      // Remove existing reaction first (if any)
+      await this.removeReaction(_chatId, messageId);
+      const result = await this.client.im.messageReaction.create({
+        path: { message_id: messageId },
+        data: { reaction_type: { emoji_type: emoji } },
+      });
+      const reactionId = (result as any)?.data?.reaction_id;
+      if (reactionId) this.reactionIds.set(messageId, reactionId);
+    } catch {
+      // Non-fatal: reaction API may not be available in all contexts
+    }
+  }
+
+  async removeReaction(_chatId: string, messageId: string): Promise<void> {
+    if (!this.client) return;
+    const reactionId = this.reactionIds.get(messageId);
+    if (!reactionId) return;
+    try {
+      await this.client.im.messageReaction.delete({
+        path: { message_id: messageId, reaction_id: reactionId },
+      });
+      this.reactionIds.delete(messageId);
+    } catch {
+      // Non-fatal
+    }
   }
 
   validateConfig(): string | null {

@@ -10,6 +10,12 @@ export abstract class BaseChannelAdapter {
   abstract sendTyping(chatId: string): Promise<void>;
   abstract validateConfig(): string | null;
   abstract isAuthorized(userId: string, chatId: string): boolean;
+
+  /** Add a reaction emoji to a message. Override in adapters that support reactions. */
+  async addReaction(_chatId: string, _messageId: string, _emoji: string): Promise<void> {}
+
+  /** Remove all bot reactions from a message. */
+  async removeReaction(_chatId: string, _messageId: string): Promise<void> {}
 }
 
 const factories = new Map<ChannelType, () => BaseChannelAdapter>();

@@ -264,13 +264,12 @@ async function main() {
           if (!target.chatId) continue;
 
           try {
-            // Feishu WSClient doesn't support card action callbacks — use text-based approval
-            const useTextApproval = adapter.channelType === 'feishu';
             const sendResult = await adapter.send({
               chatId: target.chatId,
               receiveIdType: target.receiveIdType,
-              text: useTextApproval ? text + '\n\n💬 回复 **allow** 或 **deny**' : text,
-              buttons: useTextApproval ? undefined : buttons,
+              text: text,
+              buttons,
+              feishuHeader: { template: 'orange', title: '🔐 Permission Required' },
             });
             // Track for reply routing and permission resolution
             if (perm.session_id) {

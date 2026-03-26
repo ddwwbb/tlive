@@ -1,5 +1,5 @@
 import { BaseChannelAdapter, createAdapter } from '../channels/base.js';
-import type { InboundMessage } from '../channels/types.js';
+import type { InboundMessage, OutboundMessage } from '../channels/types.js';
 import { ConversationEngine } from './conversation.js';
 import { ChannelRouter } from './router.js';
 import { PermissionBroker } from '../permissions/broker.js';
@@ -379,10 +379,26 @@ export class BridgeManager {
       verboseLevel,
       platformLimit: platformLimits[adapter.channelType] ?? 4096,
       flushCallback: async (content, isEdit) => {
-        // Convert markdown to platform-specific format
-        const outMsg = adapter.channelType === 'telegram'
-          ? { chatId: msg.chatId, html: markdownToTelegram(content) }
-          : { chatId: msg.chatId, text: content };
+        let outMsg: OutboundMessage;
+
+        if (adapter.channelType === 'telegram') {
+          // Style: italic tool chain, code-wrapped cost
+          let styled = content;
+          // Wrap tool chain line in italic
+          styled = styled.replace(/^((?:📖|✏️|📝|🖥️|🔍|📂|🤖|🌐|🔧)[^\n]*)\n(━+)/m, '<i>$1</i>\n$2');
+          // Wrap cost line in code
+          styled = styled.replace(/(📊[^\n]+)$/m, '<code>$1</code>');
+          outMsg = { chatId: msg.chatId, html: markdownToTelegram(styled) };
+        } else if (adapter.channelType === 'discord') {
+          // Style: italic tool chain, inline code cost
+          let styled = content;
+          styled = styled.replace(/^((?:📖|✏️|📝|🖥️|🔍|📂|🤖|🌐|🔧)[^\n]*)\n(━+)/m, '*$1*\n$2');
+          styled = styled.replace(/(📊[^\n]+)$/m, '`$1`');
+          outMsg = { chatId: msg.chatId, text: styled };
+        } else {
+          // Feishu: content goes into card markdown, no extra wrapping needed
+          outMsg = { chatId: msg.chatId, text: content };
+        }
 
         if (!isEdit) {
           const result = await adapter.send(outMsg);
@@ -455,17 +471,42 @@ export class BridgeManager {
       case '/status': {
         const ctx = getBridgeContext();
         const healthy = (ctx.core as { isHealthy?: () => boolean }).isHealthy?.() ?? false;
-        await adapter.send({
-          chatId: msg.chatId,
-          text: `TermLive Status\nCore: ${healthy ? '● connected' : '○ disconnected'}\nAdapters: ${this.adapters.size} active`,
-        });
+        const coreStatus = healthy ? '● connected' : '○ disconnected';
+        const channelList = Array.from(this.adapters.keys()).join(', ') || 'none';
+        const statusText = [
+          '📡 TLive Status',
+          '',
+          `Bridge:     ● running`,
+          `Core:       ${coreStatus}`,
+          `Channels:   ${channelList}`,
+        ].join('\n');
+
+        if (adapter.channelType === 'telegram') {
+          await adapter.send({ chatId: msg.chatId, html: `<pre>${statusText}</pre>` });
+        } else if (adapter.channelType === 'discord') {
+          await adapter.send({ chatId: msg.chatId, text: `\`\`\`\n${statusText}\n\`\`\`` });
+        } else {
+          await adapter.send({
+            chatId: msg.chatId,
+            text: statusText,
+            feishuHeader: { template: 'blue', title: '📡 TLive Status' },
+          });
+        }
         return true;
       }
       case '/new': {
         const newSessionId = `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         await this.router.rebind(msg.channelType, msg.chatId, newSessionId);
         this.clearLastActive(msg.channelType, msg.chatId);
-        await adapter.send({ chatId: msg.chatId, text: '🆕 New session started.' });
+        if (adapter.channelType === 'feishu') {
+          await adapter.send({
+            chatId: msg.chatId,
+            text: 'Session cleared. Send a message to begin.',
+            feishuHeader: { template: 'green', title: '🆕 New Session' },
+          });
+        } else {
+          await adapter.send({ chatId: msg.chatId, text: '🆕 New session started.' });
+        }
         return true;
       }
       case '/verbose': {
@@ -506,18 +547,16 @@ export class BridgeManager {
           return true;
         }
 
-        // Sort by creation date (newest first) and limit to 10
         const sorted = allSessions
           .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
           .slice(0, 10);
 
-        const lines: string[] = ['📋 Sessions:'];
+        const lines: string[] = [];
         for (let i = 0; i < sorted.length; i++) {
           const s = sorted[i];
           const isCurrent = s.id === currentSessionId;
           const marker = isCurrent ? ' ◀' : '';
           const date = new Date(s.createdAt).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-          // Get first user message as preview
           const msgs = await store.getMessages(s.id);
           const firstUser = msgs.find(m => m.role === 'user');
           const preview = firstUser
@@ -525,8 +564,20 @@ export class BridgeManager {
             : '(empty)';
           lines.push(`${i + 1}. ${date} — ${preview}${marker}`);
         }
-        lines.push('', 'Use /session <n> to switch');
-        await adapter.send({ chatId: msg.chatId, text: lines.join('\n') });
+
+        const footer = '\nUse /session <n> to switch';
+
+        if (adapter.channelType === 'telegram') {
+          await adapter.send({ chatId: msg.chatId, html: `<b>📋 Sessions</b>\n\n${lines.join('\n')}${footer}` });
+        } else if (adapter.channelType === 'discord') {
+          await adapter.send({ chatId: msg.chatId, text: `**📋 Sessions**\n${lines.join('\n')}${footer}` });
+        } else {
+          await adapter.send({
+            chatId: msg.chatId,
+            text: `${lines.join('\n')}${footer}`,
+            feishuHeader: { template: 'blue', title: '📋 Sessions' },
+          });
+        }
         return true;
       }
       case '/session': {
@@ -564,24 +615,36 @@ export class BridgeManager {
         return true;
       }
       case '/help': {
-        await adapter.send({
-          chatId: msg.chatId,
-          text: [
-            'TLive IM Commands:',
-            '',
-            '/new              New conversation',
-            '/sessions         List recent sessions',
-            '/session <n>      Switch to session #n',
-            '/verbose 0|1|2    Detail level',
-            '  0 = quiet (result only)',
-            '  1 = normal (tools + streaming)',
-            '  2 = detailed (tools + input summary)',
-            '/hooks pause      Auto-allow, no notifications',
-            '/hooks resume     Resume IM approval',
-            '/status           Bridge + hooks status',
-            '/help             This message',
-          ].join('\n'),
-        });
+        const helpLines = [
+          '/new              New conversation',
+          '/sessions         List recent sessions',
+          '/session <n>      Switch to session #n',
+          '/verbose 0|1|2    Detail level',
+          '  0 = quiet (result only)',
+          '  1 = normal (tools + streaming)',
+          '  2 = detailed (tools + input summary)',
+          '/hooks pause      Auto-allow, no notifications',
+          '/hooks resume     Resume IM approval',
+          '/status           Bridge + hooks status',
+          '/help             This message',
+        ];
+
+        if (adapter.channelType === 'telegram') {
+          const htmlLines = helpLines.map(line => {
+            if (line.startsWith('  ')) return line; // indent lines
+            const [cmd, ...desc] = line.split(/\s{2,}/);
+            return desc.length ? `<code>${cmd}</code>  ${desc.join(' ')}` : line;
+          });
+          await adapter.send({ chatId: msg.chatId, html: `<b>TLive Commands</b>\n\n${htmlLines.join('\n')}` });
+        } else if (adapter.channelType === 'discord') {
+          await adapter.send({ chatId: msg.chatId, text: `**TLive Commands**\n\`\`\`\n${helpLines.join('\n')}\n\`\`\`` });
+        } else {
+          await adapter.send({
+            chatId: msg.chatId,
+            text: helpLines.join('\n'),
+            feishuHeader: { template: 'indigo', title: '❓ TLive Commands' },
+          });
+        }
         return true;
       }
       default:

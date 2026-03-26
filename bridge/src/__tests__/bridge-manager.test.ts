@@ -164,7 +164,7 @@ describe('BridgeManager', () => {
     });
 
     expect(adapter.send).toHaveBeenCalledWith(
-      expect.objectContaining({ text: expect.stringContaining('/verbose') })
+      expect.objectContaining({ html: expect.stringContaining('/verbose') })
     );
   });
 

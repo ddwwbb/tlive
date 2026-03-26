@@ -1,6 +1,6 @@
 {
   "name": "tlive",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Terminal live monitoring + IM bridge for AI coding tools",
   "type": "module",
   "bin": {
@@ -9,6 +9,7 @@
   "files": [
     "scripts/cli.js",
     "scripts/postinstall.js",
+    "scripts/preuninstall.js",
     "scripts/hook-handler.sh",
     "scripts/notify-handler.sh",
     "scripts/stop-handler.sh",
@@ -24,6 +25,7 @@
   ],
   "scripts": {
     "postinstall": "node scripts/postinstall.js",
+    "preuninstall": "node scripts/preuninstall.js",
     "prepublishOnly": "cd bridge && npm install && npm run build && npm test",
     "build": "cd bridge && npm run build",
     "test": "cd bridge && npm test",

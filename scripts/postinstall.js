@@ -88,6 +88,8 @@ async function downloadGoBinary() {
   const binaryName = `tlive-core${ext}`;
   const dest = join(BIN_DIR, binaryName);
 
+  const version = getVersion();
+
   if (existsSync(dest)) {
     if (statSync(dest).size > 0) {
       // Check if existing binary matches current package version
@@ -109,8 +111,6 @@ async function downloadGoBinary() {
   }
 
   mkdirSync(BIN_DIR, { recursive: true });
-
-  const version = getVersion();
   const url = `https://github.com/${GITHUB_REPO}/releases/download/${version}/tlive-${os}-${cpu}${ext}`;
 
   console.log(`Downloading tlive-core for ${os}-${cpu}...`);

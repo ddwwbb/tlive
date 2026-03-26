@@ -264,10 +264,12 @@ async function main() {
           if (!target.chatId) continue;
 
           try {
+            // Feishu: add text fallback hint alongside buttons (in case card action not configured)
+            const feishuHint = adapter.channelType === 'feishu' ? '\n\n💬 或回复 **allow** / **deny**' : '';
             const outMsg = {
               chatId: target.chatId,
               receiveIdType: target.receiveIdType,
-              text: text,
+              text: text + feishuHint,
               buttons,
               feishuHeader: { template: 'orange', title: '🔐 Permission Required' },
             };

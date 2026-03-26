@@ -302,10 +302,12 @@ export class FeishuAdapter extends BaseChannelAdapter {
       } as any);
     }
 
-    return buildFeishuCard({
+    const cardJson = buildFeishuCard({
       header: header as any,
       elements,
     });
+    console.log(`[feishu] card JSON: ${cardJson.slice(0, 500)}`);
+    return cardJson;
   }
 
   async send(message: OutboundMessage): Promise<SendResult> {

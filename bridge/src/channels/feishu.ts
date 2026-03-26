@@ -6,6 +6,48 @@ import { classifyError } from './errors.js';
 import { markdownToFeishu } from '../markdown/feishu.js';
 import { buildFeishuCard } from '../formatting/feishu-card.js';
 import { FeishuStreamingSession } from './feishu-streaming.js';
+import { Readable } from 'node:stream';
+
+/**
+ * Read a Feishu SDK response into a Buffer.
+ * The SDK returns different formats depending on version/endpoint:
+ * Buffer, ArrayBuffer, async iterable, or nested in .data
+ * (Inspired by openclaw's readFeishuResponseBuffer)
+ */
+async function readFeishuBuffer(resp: unknown): Promise<Buffer | null> {
+  if (!resp) return null;
+  const r = resp as any;
+  // Direct Buffer
+  if (Buffer.isBuffer(r)) return r;
+  if (r instanceof ArrayBuffer) return Buffer.from(r);
+  // Nested in .data
+  if (r.data && Buffer.isBuffer(r.data)) return r.data;
+  if (r.data instanceof ArrayBuffer) return Buffer.from(r.data);
+  // Async iterable (stream)
+  if (typeof r.data?.[Symbol.asyncIterator] === 'function') {
+    const chunks: Buffer[] = [];
+    for await (const chunk of r.data as AsyncIterable<Buffer>) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks);
+  }
+  if (typeof r[Symbol.asyncIterator] === 'function') {
+    const chunks: Buffer[] = [];
+    for await (const chunk of r as AsyncIterable<Buffer>) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks);
+  }
+  // Readable stream
+  if (typeof r.data?.read === 'function') {
+    const chunks: Buffer[] = [];
+    for await (const chunk of r.data as Readable) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks);
+  }
+  return null;
+}
 
 /** Feishu interactive card element – now imported from shared types */
 type FeishuCardElement = import('../formatting/types.js').FeishuCardElement;
@@ -80,26 +122,27 @@ export class FeishuAdapter extends BaseChannelAdapter {
             replyToMessageId: msg.parent_id || msg.root_id || undefined,
           });
         } else if (msg.message_type === 'image') {
+          console.log(`[feishu] Received image message: ${msg.message_id}`);
           try {
             const imageKey = JSON.parse(msg.content).image_key;
-            const resp = await this.client!.im.v1.messageResource.get({
-              path: { message_id: msg.message_id, file_key: imageKey },
-              params: { type: 'image' },
+            console.log(`[feishu] Downloading image: key=${imageKey}`);
+            // Use im.image.get (like openclaw) — more reliable than messageResource.get
+            const resp = await this.client!.im.image.get({
+              path: { image_key: imageKey },
             });
-            if (resp?.data) {
-              const chunks: Buffer[] = [];
-              for await (const chunk of resp.data as AsyncIterable<Buffer>) {
-                chunks.push(chunk);
-              }
-              const buf = Buffer.concat(chunks);
-              if (buf.length <= 10_000_000) {
-                attachments.push({
-                  type: 'image', name: 'image.png',
-                  mimeType: 'image/png', base64Data: buf.toString('base64'),
-                });
-              }
+            const buf = await readFeishuBuffer(resp);
+            if (buf && buf.length > 0 && buf.length <= 10_000_000) {
+              console.log(`[feishu] Image downloaded: ${buf.length} bytes`);
+              attachments.push({
+                type: 'image', name: 'image.png',
+                mimeType: 'image/png', base64Data: buf.toString('base64'),
+              });
+            } else {
+              console.warn(`[feishu] Image download returned empty or oversized: ${buf?.length ?? 0} bytes`);
             }
-          } catch { /* skip undownloadable images */ }
+          } catch (err) {
+            console.warn(`[feishu] Image download failed:`, (err as any)?.msg || (err as any)?.message || err);
+          }
 
           if (attachments.length > 0) {
             this.messageQueue.push({
@@ -175,6 +218,8 @@ export class FeishuAdapter extends BaseChannelAdapter {
   }
 
   private buildCard(text: string, buttons?: OutboundMessage['buttons'], header?: { template: string; title: string }): string {
+    if (header) console.log(`[feishu] buildCard with header: ${header.template} "${header.title}"`);
+    else console.log(`[feishu] buildCard without header`);
     const elements: FeishuCardElement[] = [
       { tag: 'markdown', content: text },
     ];
@@ -225,11 +270,12 @@ export class FeishuAdapter extends BaseChannelAdapter {
 
         if (media.type === 'image') {
           // Upload image first, then send
-          const { Readable } = await import('node:stream');
+          // Pass Buffer directly — Readable.from() causes form-data issues
+          // See: https://github.com/larksuite/node-sdk/issues/121
           const uploadResult = await this.client.im.image.create({
             data: {
               image_type: 'message',
-              image: Readable.from(buffer) as any,
+              image: buffer as any,
             },
           });
           const imageKey = (uploadResult as any)?.data?.image_key;
@@ -248,12 +294,12 @@ export class FeishuAdapter extends BaseChannelAdapter {
           }
         } else {
           // Upload file then send
-          const { Readable } = await import('node:stream');
+          // Pass Buffer directly — Readable.from() causes form-data issues
           const uploadResult = await this.client.im.file.create({
             data: {
               file_type: 'stream',
               file_name: media.filename || 'file',
-              file: Readable.from(buffer) as any,
+              file: buffer as any,
             },
           });
           const fileKey = (uploadResult as any)?.data?.file_key;
@@ -315,13 +361,15 @@ export class FeishuAdapter extends BaseChannelAdapter {
 
   async editMessage(_chatId: string, messageId: string, message: OutboundMessage): Promise<void> {
     if (!this.client) return;
-    const text = markdownToFeishu(message.text ?? message.html ?? '');
+    const text = message.text
+      ? message.text
+      : markdownToFeishu(message.html ?? '');
 
     try {
       await this.client.im.message.patch({
         path: { message_id: messageId },
         data: {
-          content: this.buildCard(text, message.buttons),
+          content: this.buildCard(text, message.buttons, message.feishuHeader),
         },
       });
     } catch {

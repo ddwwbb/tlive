@@ -39,6 +39,8 @@ export interface OutboundMessage {
     template: string;
     title: string;
   };
+  /** Feishu Card 2.0: override card body elements directly (bypasses text→markdown conversion) */
+  feishuElements?: Array<Record<string, unknown>>;
   /** Media attachment to send (image or file) */
   media?: {
     type: 'image' | 'file';

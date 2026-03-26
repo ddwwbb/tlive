@@ -393,10 +393,14 @@ export class FeishuAdapter extends BaseChannelAdapter {
 
     try {
       const idType = message.receiveIdType || 'chat_id';
+      // If feishuElements provided, build card directly from structured elements
+      const cardContent = message.feishuElements
+        ? buildFeishuCard({ header: message.feishuHeader as any, elements: message.feishuElements as any })
+        : this.buildCard(raw, message.buttons, message.feishuHeader);
       const data: Record<string, unknown> = {
         receive_id: message.chatId,
         msg_type: 'interactive',
-        content: this.buildCard(raw, message.buttons, message.feishuHeader),
+        content: cardContent,
       };
       if (message.replyToMessageId) data.root_id = message.replyToMessageId;
 

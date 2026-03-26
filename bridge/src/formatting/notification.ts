@@ -6,6 +6,8 @@ interface NotificationMessage {
   html?: string;
   embed?: OutboundMessage['embed'];
   feishuHeader?: { template: string; title: string };
+  /** Feishu Card 2.0: structured elements for richer layout */
+  feishuElements?: Array<Record<string, unknown>>;
 }
 
 const COLOR_MAP: Record<NotificationData['type'], number> = {
@@ -58,12 +60,21 @@ export function formatNotification(data: NotificationData, channelType: ChannelT
     }
 
     case 'feishu': {
-      const parts: string[] = [];
-      if (summary) parts.push(`> ${summary.replace(/\n/g, '\n> ')}`);
-      if (data.terminalUrl) parts.push(`🔗 [Open Terminal](${data.terminalUrl})`);
+      const elements: Array<Record<string, unknown>> = [];
+      if (summary) {
+        elements.push({ tag: 'markdown', content: summary });
+      }
+      if (data.terminalUrl) {
+        elements.push({ tag: 'hr' });
+        elements.push({
+          tag: 'note',
+          elements: [{ tag: 'plain_text', content: `🔗 Open Terminal: ${data.terminalUrl}` }],
+        });
+      }
       return {
-        text: parts.join('\n'),
+        text: summary || '',
         feishuHeader: { template: HEADER_MAP[data.type], title: `${emoji} ${data.title}` },
+        feishuElements: elements,
       };
     }
   }

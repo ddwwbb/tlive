@@ -202,6 +202,7 @@ export class BridgeManager {
       html: formatted.html,
       embed: formatted.embed,
       feishuHeader: formatted.feishuHeader,
+      feishuElements: (formatted as any).feishuElements,
       receiveIdType,
     };
     const result = await adapter.send(outMsg);

@@ -40,6 +40,8 @@ export class BridgeManager {
   private verboseLevels = new Map<string, VerboseLevel>();
   private lastActive = new Map<string, number>();
   private lastChatId = new Map<string, string>();
+  /** Deduplicate hook permission resolutions */
+  private resolvedHookIds = new Set<string>();
   /** Pending image attachments waiting for a text message to merge with (key: channelType:chatId) */
   private pendingAttachments = new Map<string, { attachments: import('../channels/types.js').FileAttachment[]; timestamp: number }>();
   private hookMessages = new Map<string, { sessionId: string; timestamp: number }>();
@@ -337,6 +339,10 @@ export class BridgeManager {
         const hookId = parts[2];
         const sessionId = parts[3] || '';
 
+        // Deduplicate: skip if already resolved
+        if (this.resolvedHookIds.has(hookId)) return true;
+        this.resolvedHookIds.add(hookId);
+
         if (this.coreAvailable) {
           try {
             await fetch(`${this.coreUrl}/api/hooks/permission/${hookId}/resolve`, {
@@ -354,23 +360,17 @@ export class BridgeManager {
               deny: '❌ Denied',
             };
             const label = labels[decision] || '✅ Allowed';
-            // Try to update the original card (replace buttons with result)
-            try {
-              await adapter.editMessage(msg.chatId, msg.messageId, {
-                chatId: msg.chatId,
-                text: label,
-                feishuHeader: {
-                  template: decision === 'deny' ? 'red' : 'green',
-                  title: label,
-                },
-              });
-            } catch {
-              // Fallback: send new message if edit fails
-            }
-            const confirmResult = await adapter.send({
+            // Update the original card — remove buttons, show result
+            await adapter.editMessage(msg.chatId, msg.messageId, {
               chatId: msg.chatId,
               text: label,
+              feishuHeader: {
+                template: decision === 'deny' ? 'red' : 'green',
+                title: label,
+              },
             });
+            // Use messageId from edited card for reply tracking
+            const confirmResult = { messageId: msg.messageId, success: true };
             // Track confirmation message for reply routing
             if (sessionId) {
               this.trackHookMessage(confirmResult.messageId, sessionId);

@@ -202,6 +202,78 @@ export class FeishuAdapter extends BaseChannelAdapter {
 
     const raw = markdownToFeishu(message.text ?? message.html ?? '');
 
+    // Media sending
+    if (message.media) {
+      try {
+        const media = message.media;
+        let buffer: Buffer;
+        if (media.buffer) {
+          buffer = media.buffer;
+        } else if (media.url?.startsWith('data:')) {
+          const base64 = media.url.split(',')[1];
+          buffer = Buffer.from(base64, 'base64');
+        } else if (media.url) {
+          // Fetch URL to buffer
+          const resp = await fetch(media.url);
+          buffer = Buffer.from(await resp.arrayBuffer());
+        } else {
+          throw new Error('No media source');
+        }
+
+        if (media.type === 'image') {
+          // Upload image first, then send
+          const { Readable } = await import('node:stream');
+          const uploadResult = await this.client.im.image.create({
+            data: {
+              image_type: 'message',
+              image: Readable.from(buffer) as any,
+            },
+          });
+          const imageKey = (uploadResult as any)?.data?.image_key;
+          if (imageKey) {
+            const idType = message.receiveIdType || 'chat_id';
+            const result = await this.client.im.message.create({
+              params: { receive_id_type: idType },
+              data: {
+                receive_id: message.chatId,
+                msg_type: 'image',
+                content: JSON.stringify({ image_key: imageKey }),
+              },
+            });
+            const messageId = (result as any)?.data?.message_id ?? '';
+            return { messageId: String(messageId), success: true };
+          }
+        } else {
+          // Upload file then send
+          const { Readable } = await import('node:stream');
+          const uploadResult = await this.client.im.file.create({
+            data: {
+              file_type: 'stream',
+              file_name: media.filename || 'file',
+              file: Readable.from(buffer) as any,
+            },
+          });
+          const fileKey = (uploadResult as any)?.data?.file_key;
+          if (fileKey) {
+            const idType = message.receiveIdType || 'chat_id';
+            const result = await this.client.im.message.create({
+              params: { receive_id_type: idType },
+              data: {
+                receive_id: message.chatId,
+                msg_type: 'file',
+                content: JSON.stringify({ file_key: fileKey }),
+              },
+            });
+            const messageId = (result as any)?.data?.message_id ?? '';
+            return { messageId: String(messageId), success: true };
+          }
+        }
+      } catch (err) {
+        // Fall through to text-only if media fails
+        if (!message.text && !message.html) throw classifyError('feishu', err);
+      }
+    }
+
     try {
       const idType = message.receiveIdType || 'chat_id';
       const data: Record<string, unknown> = {

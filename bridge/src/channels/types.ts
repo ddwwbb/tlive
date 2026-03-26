@@ -39,6 +39,18 @@ export interface OutboundMessage {
     template: string;
     title: string;
   };
+  /** Media attachment to send (image or file) */
+  media?: {
+    type: 'image' | 'file';
+    /** URL to fetch, or data URI (data:image/png;base64,...) */
+    url?: string;
+    /** Raw buffer data */
+    buffer?: Buffer;
+    /** Filename for file attachments */
+    filename?: string;
+    /** MIME type */
+    mimeType?: string;
+  };
 }
 
 export interface SendResult {

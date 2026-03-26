@@ -114,6 +114,41 @@ export class TelegramAdapter extends BaseChannelAdapter {
   async send(message: OutboundMessage): Promise<SendResult> {
     if (!this.bot) throw new Error('Telegram bot not started');
 
+    // Media sending
+    if (message.media) {
+      try {
+        const media = message.media;
+        let source: string | Buffer;
+        if (media.buffer) {
+          source = media.buffer;
+        } else if (media.url?.startsWith('data:')) {
+          // Data URI -> Buffer
+          const base64 = media.url.split(',')[1];
+          source = Buffer.from(base64, 'base64');
+        } else if (media.url) {
+          source = media.url;
+        } else {
+          throw new Error('No media source');
+        }
+
+        if (media.type === 'image') {
+          const result = await this.bot!.sendPhoto(message.chatId, source as any, {
+            caption: message.text,
+            ...(message.html ? { parse_mode: 'HTML' as const, caption: message.html } : {}),
+          });
+          return { messageId: String(result.message_id), success: true };
+        } else {
+          const result = await this.bot!.sendDocument(message.chatId, source as any, {
+            caption: message.text,
+          }, { filename: media.filename || 'file', contentType: media.mimeType });
+          return { messageId: String(result.message_id), success: true };
+        }
+      } catch (err) {
+        // If media send fails, fall through to text-only
+        if (!message.text && !message.html) throw classifyError('telegram', err);
+      }
+    }
+
     const options: TelegramBot.SendMessageOptions = {};
     if (message.html) options.parse_mode = 'HTML';
     if (message.buttons?.length) {

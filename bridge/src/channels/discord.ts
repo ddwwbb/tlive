@@ -103,6 +103,35 @@ export class DiscordAdapter extends BaseChannelAdapter {
       throw new Error(`Channel ${message.chatId} not found or not a text channel`);
     }
 
+    // Media sending
+    if (message.media) {
+      try {
+        const media = message.media;
+        let buffer: Buffer;
+        if (media.buffer) {
+          buffer = media.buffer;
+        } else if (media.url?.startsWith('data:')) {
+          const base64 = media.url.split(',')[1];
+          buffer = Buffer.from(base64, 'base64');
+        } else if (media.url) {
+          // URL-based: use AttachmentBuilder with URL
+          const { AttachmentBuilder } = await import('discord.js');
+          const attachment = new AttachmentBuilder(media.url, { name: media.filename || 'image.png' });
+          const sent = await channel.send({ content: message.text || '', files: [attachment] }) as Message;
+          return { messageId: sent.id, success: true };
+        } else {
+          throw new Error('No media source');
+        }
+
+        const { AttachmentBuilder } = await import('discord.js');
+        const attachment = new AttachmentBuilder(buffer, { name: media.filename || 'image.png' });
+        const sent = await channel.send({ content: message.text || '', files: [attachment] }) as Message;
+        return { messageId: sent.id, success: true };
+      } catch (err) {
+        if (!message.text && !message.embed) throw classifyError('discord', err);
+      }
+    }
+
     // Embed-based messages (permission cards, notifications)
     if (message.embed) {
       const embed = new EmbedBuilder();

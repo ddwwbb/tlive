@@ -5,6 +5,9 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   go-test:
     runs-on: ubuntu-latest
@@ -13,6 +16,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24'
+          cache-dependency-path: core/go.sum
       - name: Run Go tests
         run: cd core && go test ./... -v -timeout 60s
 
@@ -36,6 +40,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24'
+          cache-dependency-path: core/go.sum
       - name: Build Go Core
         run: cd core && go build -o tlive ./cmd/tlive/
       - uses: actions/setup-node@v4

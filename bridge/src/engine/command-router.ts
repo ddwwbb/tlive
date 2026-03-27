@@ -255,6 +255,21 @@ export class CommandRouter {
         });
         return true;
       }
+      case '/runtime': {
+        const runtime = parts[1]?.toLowerCase();
+        const RUNTIMES = ['claude', 'codex'] as const;
+        if (runtime && RUNTIMES.includes(runtime as any)) {
+          this.state.setRuntime(msg.channelType, msg.chatId, runtime as 'claude' | 'codex');
+          const icons: Record<string, string> = { claude: '🟣', codex: '🟢' };
+          const text = `${icons[runtime] || '🔄'} Runtime: **${runtime}**`;
+          await adapter.send({ chatId: msg.chatId, text });
+        } else {
+          const current = this.state.getRuntime(msg.channelType, msg.chatId) || 'claude';
+          const text = `🔄 Runtime: **${current}**\nUsage: \`/runtime claude|codex\``;
+          await adapter.send({ chatId: msg.chatId, text });
+        }
+        return true;
+      }
       case '/help': {
         if (adapter.channelType === 'telegram') {
           const html = [
@@ -267,6 +282,7 @@ export class CommandRouter {
             '  0 = quiet · 1 = terminal card',
             '<code>/perm on|off</code> — Tool permission prompts',
             '<code>/effort low|high|max</code> — Thinking depth',
+            '<code>/runtime claude|codex</code> — Switch AI provider',
             '<code>/stop</code> — Interrupt current execution',
             '<code>/hooks pause|resume</code> — Toggle IM approval',
             '<code>/status</code> — Bridge status',
@@ -290,6 +306,7 @@ export class CommandRouter {
                 '`/verbose 0|1` — Detail level',
                 '> 0 = quiet · 1 = terminal card',
                 '`/perm on|off` — Tool permission prompts',
+                '`/runtime claude|codex` — Switch AI provider',
                 '`/hooks pause|resume` — Toggle IM approval',
                 '`/status` — Bridge status',
                 '`/approve <code>` — Approve pairing request',
@@ -309,6 +326,7 @@ export class CommandRouter {
             '  0 = quiet · 1 = terminal card',
             '/perm on|off — Tool permission prompts',
             '/effort low|high|max — Thinking depth',
+            '/runtime claude|codex — Switch AI provider',
             '/stop — Interrupt current execution',
             '/hooks pause|resume — Toggle IM approval',
             '/status — Bridge status',

@@ -1,6 +1,6 @@
 import { getBridgeContext } from '../context.js';
 import type { CanonicalEvent } from '../messages/schema.js';
-import type { FileAttachment, PermissionRequestHandler, QueryControls } from '../providers/base.js';
+import type { LLMProvider, FileAttachment, PermissionRequestHandler, QueryControls } from '../providers/base.js';
 
 const TEXT_MIME_PREFIXES = ['text/', 'application/json', 'application/xml', 'application/javascript', 'application/typescript', 'application/x-yaml', 'application/toml'];
 
@@ -47,6 +47,8 @@ interface ProcessMessageParams {
   /** SDK-level permission handler — forwarded to streamChat */
   sdkPermissionHandler?: PermissionRequestHandler;
   effort?: 'low' | 'medium' | 'high' | 'max';
+  /** Override LLM provider (for per-chat runtime selection) */
+  llm?: LLMProvider;
 }
 
 interface ProcessMessageResult {
@@ -57,7 +59,8 @@ interface ProcessMessageResult {
 
 export class ConversationEngine {
   async processMessage(params: ProcessMessageParams): Promise<ProcessMessageResult> {
-    const { store, llm, defaultWorkdir } = getBridgeContext();
+    const { store, llm: defaultLlm, defaultWorkdir } = getBridgeContext();
+    const llm = params.llm || defaultLlm;
     const lockKey = `session:${params.sessionId}`;
     let fullText = '';
     let usage: { inputTokens: number; outputTokens: number; costUsd?: number } | undefined;

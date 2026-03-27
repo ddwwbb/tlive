@@ -13,6 +13,7 @@ export class SessionStateManager {
   private processingChats = new Set<string>();
   private lastActive = new Map<string, number>();
   private sessionThreads = new Map<string, string>();
+  private runtimes = new Map<string, 'claude' | 'codex'>();
 
   /** Combine channelType + chatId into a single map key */
   stateKey(channelType: string, chatId: string): string {
@@ -82,5 +83,13 @@ export class SessionStateManager {
 
   clearLastActive(channelType: string, chatId: string): void {
     this.lastActive.delete(this.stateKey(channelType, chatId));
+  }
+
+  getRuntime(channelType: string, chatId: string): 'claude' | 'codex' | undefined {
+    return this.runtimes.get(this.stateKey(channelType, chatId));
+  }
+
+  setRuntime(channelType: string, chatId: string, runtime: 'claude' | 'codex'): void {
+    this.runtimes.set(this.stateKey(channelType, chatId), runtime);
   }
 }

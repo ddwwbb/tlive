@@ -6,6 +6,8 @@ import { PermissionBroker } from '../permissions/broker.js';
 import { PendingPermissions } from '../permissions/gateway.js';
 import { DeliveryLayer } from '../delivery/delivery.js';
 import { getBridgeContext } from '../context.js';
+import { resolveProvider } from '../providers/index.js';
+import type { LLMProvider } from '../providers/base.js';
 import { loadConfig } from '../config.js';
 import { markdownToTelegram } from '../markdown/index.js';
 import { downgradeHeadings } from '../markdown/feishu.js';
@@ -20,7 +22,7 @@ import { join } from 'node:path';
 import { homedir, networkInterfaces } from 'node:os';
 
 /** Bridge commands handled synchronously (don't block adapter loop) */
-const QUICK_COMMANDS = new Set(['/new', '/status', '/verbose', '/hooks', '/sessions', '/session', '/help', '/perm', '/effort', '/stop', '/approve', '/pairings']);
+const QUICK_COMMANDS = new Set(['/new', '/status', '/verbose', '/hooks', '/sessions', '/session', '/help', '/perm', '/effort', '/stop', '/approve', '/pairings', '/runtime']);
 
 function isPrivateIPv4(ip: string): boolean {
   const parts = ip.split('.').map(Number);
@@ -76,6 +78,8 @@ export class BridgeManager {
 
   private commands: CommandRouter;
   private chatIdFile: string;
+  /** Cached LLM providers keyed by runtime name */
+  private providerCache = new Map<string, LLMProvider>();
 
   constructor() {
     const config = loadConfig();
@@ -116,6 +120,17 @@ export class BridgeManager {
   /** Get the last active chatId for a given channel type (for hook routing) */
   getLastChatId(channelType: string): string {
     return this.lastChatId.get(channelType) ?? '';
+  }
+
+  /** Resolve LLM provider for a chat — uses per-chat runtime if set, else global default */
+  private getProvider(channelType: string, chatId: string): LLMProvider {
+    const runtime = this.state.getRuntime(channelType, chatId);
+    if (!runtime) return getBridgeContext().llm;
+
+    if (!this.providerCache.has(runtime)) {
+      this.providerCache.set(runtime, resolveProvider(runtime, this.permissions.getGateway()));
+    }
+    return this.providerCache.get(runtime)!;
   }
 
   /** Delegate: track a hook message for reply routing */
@@ -633,6 +648,7 @@ export class BridgeManager {
         sessionId: binding.sessionId,
         text: msg.text,
         attachments: msg.attachments,
+        llm: this.getProvider(msg.channelType, msg.chatId),
         sdkPermissionHandler,
         effort: this.state.getEffort(msg.channelType, msg.chatId),
         onControls: (ctrl) => {

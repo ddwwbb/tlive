@@ -10,6 +10,7 @@ import { loadConfig } from '../config.js';
 import { markdownToTelegram } from '../markdown/index.js';
 import { downgradeHeadings } from '../markdown/feishu.js';
 import { TerminalCardRenderer, type VerboseLevel } from './terminal-card-renderer.js';
+import { SessionStateManager } from './session-state.js';
 import type { FeishuStreamingSession } from '../channels/feishu-streaming.js';
 import { CostTracker } from './cost-tracker.js';
 import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from 'node:fs';
@@ -65,18 +66,11 @@ export class BridgeManager {
   private coreUrl: string;
   private token: string;
   private coreAvailable = false;
-  private verboseLevels = new Map<string, VerboseLevel>();
-  /** Permission mode: 'on' = smart prompting (default), 'off' = auto-allow all */
-  private permModes = new Map<string, 'on' | 'off'>();
-  /** Effort level per chat: controls Claude's thinking depth */
-  private effortLevels = new Map<string, 'low' | 'medium' | 'high' | 'max'>();
+  private state = new SessionStateManager();
   /** Track pending SDK permission IDs per chat for text-based resolution (key: stateKey, value: permId) */
   private pendingSdkPerms = new Map<string, string>();
-  /** Per-chat processing guard — prevents concurrent processMessage for the same session */
-  private processingChats = new Set<string>();
   /** Active query controls per chat — for /stop command */
   private activeControls = new Map<string, import('../providers/base.js').QueryControls>();
-  private lastActive = new Map<string, number>();
   private lastChatId = new Map<string, string>();
   /** Deduplicate hook permission resolutions (with timestamp for TTL cleanup) */
   private resolvedHookIds = new Map<string, number>();
@@ -84,8 +78,6 @@ export class BridgeManager {
   private hookPermissionTexts = new Map<string, { text: string; ts: number }>();
   /** Pending image attachments waiting for a text message to merge with (key: channelType:chatId) */
   private pendingAttachments = new Map<string, { attachments: import('../channels/types.js').FileAttachment[]; timestamp: number }>();
-  /** Discord thread IDs for sessions (key: channelType:chatId, value: threadId) */
-  private sessionThreads = new Map<string, string>();
   private hookMessages = new Map<string, { sessionId: string; timestamp: number }>();
   private permissionMessages = new Map<string, { permissionId: string; sessionId: string; timestamp: number }>();
   private latestPermission = new Map<string, { permissionId: string; sessionId: string; messageId: string }>();
@@ -145,47 +137,6 @@ export class BridgeManager {
     for (const adapter of this.adapters.values()) {
       await adapter.stop();
     }
-  }
-
-  private stateKey(channelType: string, chatId: string): string {
-    return `${channelType}:${chatId}`;
-  }
-
-  private getVerboseLevel(channelType: string, chatId: string): VerboseLevel {
-    return this.verboseLevels.get(this.stateKey(channelType, chatId)) ?? 1;
-  }
-
-  private setVerboseLevel(channelType: string, chatId: string, level: VerboseLevel): void {
-    this.verboseLevels.set(this.stateKey(channelType, chatId), level);
-  }
-
-  getPermMode(channelType: string, chatId: string): 'on' | 'off' {
-    return this.permModes.get(this.stateKey(channelType, chatId)) ?? 'on';
-  }
-
-  private setPermMode(channelType: string, chatId: string, mode: 'on' | 'off'): void {
-    this.permModes.set(this.stateKey(channelType, chatId), mode);
-  }
-
-  private getEffort(channelType: string, chatId: string): 'low' | 'medium' | 'high' | 'max' | undefined {
-    return this.effortLevels.get(this.stateKey(channelType, chatId));
-  }
-
-  private setEffort(channelType: string, chatId: string, level: 'low' | 'medium' | 'high' | 'max'): void {
-    this.effortLevels.set(this.stateKey(channelType, chatId), level);
-  }
-
-  private checkAndUpdateLastActive(channelType: string, chatId: string): boolean {
-    const key = this.stateKey(channelType, chatId);
-    const last = this.lastActive.get(key);
-    const now = Date.now();
-    this.lastActive.set(key, now);
-    if (last && (now - last) > 30 * 60 * 1000) return true;
-    return false;
-  }
-
-  private clearLastActive(channelType: string, chatId: string): void {
-    this.lastActive.delete(this.stateKey(channelType, chatId));
   }
 
   /** Track a hook message for reply routing */
@@ -298,15 +249,15 @@ export class BridgeManager {
         }
       } else {
         // Guard: if this chat is already processing a message, tell the user
-        const chatKey = this.stateKey(msg.channelType, msg.chatId);
-        if (this.processingChats.has(chatKey)) {
+        const chatKey = this.state.stateKey(msg.channelType, msg.chatId);
+        if (this.state.isProcessing(chatKey)) {
           await adapter.send({ chatId: msg.chatId, text: '⏳ Previous message still processing, please wait...' }).catch(() => {});
           continue;
         }
-        this.processingChats.add(chatKey);
+        this.state.setProcessing(chatKey, true);
         this.handleInboundMessage(adapter, msg)
           .catch(err => console.error(`[${adapter.channelType}] Error handling message:`, err))
-          .finally(() => this.processingChats.delete(chatKey));
+          .finally(() => this.state.setProcessing(chatKey, false));
       }
     }
   }
@@ -372,7 +323,7 @@ export class BridgeManager {
       const decision = this.parsePermissionText(msg.text);
       if (decision) {
         // 1. Try SDK permission gateway — scoped to THIS chat only
-        const chatKey = this.stateKey(msg.channelType, msg.chatId);
+        const chatKey = this.state.stateKey(msg.channelType, msg.chatId);
         const pendingPermId = this.pendingSdkPerms.get(chatKey);
         if (pendingPermId) {
           const gwDecision = decision === 'deny' ? 'deny' as const
@@ -557,11 +508,11 @@ export class BridgeManager {
     }
 
     // Check for session expiry (>30 min inactivity) and auto-create new session
-    const expired = this.checkAndUpdateLastActive(msg.channelType, msg.chatId);
+    const expired = this.state.checkAndUpdateLastActive(msg.channelType, msg.chatId);
     if (expired) {
       const newSessionId = `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       await this.router.rebind(msg.channelType, msg.chatId, newSessionId);
-      this.sessionThreads.delete(this.stateKey(msg.channelType, msg.chatId));
+      this.state.clearThread(msg.channelType, msg.chatId);
     }
 
     const binding = await this.router.resolve(msg.channelType, msg.chatId);
@@ -569,7 +520,7 @@ export class BridgeManager {
     // Resolve threadId: use existing thread if message came from one, or reuse session thread
     let threadId = msg.threadId;
     if (!threadId && adapter.channelType === 'discord') {
-      threadId = this.sessionThreads.get(this.stateKey(msg.channelType, msg.chatId));
+      threadId = this.state.getThread(msg.channelType, msg.chatId);
     }
     // For Telegram topics, always pass threadId through
     if (!threadId && msg.threadId) {
@@ -586,7 +537,7 @@ export class BridgeManager {
     }, 4000);
     adapter.sendTyping(typingTarget).catch(() => {});
 
-    const verboseLevel = this.getVerboseLevel(msg.channelType, msg.chatId);
+    const verboseLevel = this.state.getVerboseLevel(msg.channelType, msg.chatId);
     const costTracker = new CostTracker();
     costTracker.start();
 
@@ -645,7 +596,7 @@ export class BridgeManager {
             const newThreadId = await (adapter as any).createThread(msg.chatId, result.messageId, `💬 ${preview}`);
             if (newThreadId) {
               threadId = newThreadId;
-              this.sessionThreads.set(this.stateKey(msg.channelType, msg.chatId), newThreadId);
+              this.state.setThread(msg.channelType, msg.chatId, newThreadId);
             }
             return result.messageId;
           }
@@ -662,11 +613,11 @@ export class BridgeManager {
     const toolIdMap = new Map<string, string>(); // SDK tool_use_id → renderer tool ID
 
     // Build SDK-level permission handler based on /perm mode
-    const permMode = this.getPermMode(msg.channelType, msg.chatId);
+    const permMode = this.state.getPermMode(msg.channelType, msg.chatId);
     const sdkPermissionHandler = permMode === 'on'
       ? async (toolName: string, toolInput: Record<string, unknown>, promptSentence: string, signal?: AbortSignal) => {
           const permId = `sdk-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-          const chatKey = this.stateKey(msg.channelType, msg.chatId);
+          const chatKey = this.state.stateKey(msg.channelType, msg.chatId);
           this.pendingSdkPerms.set(chatKey, permId);
           console.log(`[bridge] Permission request: ${toolName} (${permId}) for ${chatKey}`);
 
@@ -723,9 +674,9 @@ export class BridgeManager {
         text: msg.text,
         attachments: msg.attachments,
         sdkPermissionHandler,
-        effort: this.getEffort(msg.channelType, msg.chatId),
+        effort: this.state.getEffort(msg.channelType, msg.chatId),
         onControls: (ctrl) => {
-          const chatKey = this.stateKey(msg.channelType, msg.chatId);
+          const chatKey = this.state.stateKey(msg.channelType, msg.chatId);
           this.activeControls.set(chatKey, ctrl);
         },
         onTextDelta: (delta) => renderer.onTextDelta(delta),
@@ -803,7 +754,7 @@ export class BridgeManager {
     } finally {
       clearInterval(typingInterval);
       renderer.dispose();
-      this.activeControls.delete(this.stateKey(msg.channelType, msg.chatId));
+      this.activeControls.delete(this.state.stateKey(msg.channelType, msg.chatId));
       // Close Feishu streaming card
       if (feishuSession) {
         feishuSession.close().catch(() => {});
@@ -858,9 +809,9 @@ export class BridgeManager {
       case '/new': {
         const newSessionId = `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         await this.router.rebind(msg.channelType, msg.chatId, newSessionId);
-        this.clearLastActive(msg.channelType, msg.chatId);
+        this.state.clearLastActive(msg.channelType, msg.chatId);
         // Clear Discord thread binding so next conversation creates a fresh thread
-        this.sessionThreads.delete(this.stateKey(msg.channelType, msg.chatId));
+        this.state.clearThread(msg.channelType, msg.chatId);
         if (adapter.channelType === 'feishu') {
           await adapter.send({
             chatId: msg.chatId,
@@ -880,7 +831,7 @@ export class BridgeManager {
       case '/verbose': {
         const level = parseInt(parts[1], 10) as VerboseLevel;
         if ([0, 1].includes(level)) {
-          this.setVerboseLevel(msg.channelType, msg.chatId, level);
+          this.state.setVerboseLevel(msg.channelType, msg.chatId, level);
           const labels = ['🤫 quiet', '📝 terminal card'];
           const text = `Verbose: ${labels[level]}`;
           if (adapter.channelType === 'discord') {
@@ -901,7 +852,7 @@ export class BridgeManager {
       case '/perm': {
         const sub = parts[1]?.toLowerCase();
         if (sub === 'on' || sub === 'off') {
-          this.setPermMode(msg.channelType, msg.chatId, sub);
+          this.state.setPermMode(msg.channelType, msg.chatId, sub);
           const text = sub === 'on'
             ? '🔐 Permission prompts: ON — dangerous tools will ask for confirmation'
             : '⚡ Permission prompts: OFF — all tools auto-allowed';
@@ -911,7 +862,7 @@ export class BridgeManager {
             await adapter.send({ chatId: msg.chatId, text });
           }
         } else {
-          const current = this.getPermMode(msg.channelType, msg.chatId);
+          const current = this.state.getPermMode(msg.channelType, msg.chatId);
           const text = `🔐 Permission mode: **${current}**\nUsage: \`/perm on|off\`\non = prompt for dangerous tools (default)\noff = auto-allow all`;
           if (adapter.channelType === 'discord') {
             await adapter.send({ chatId: msg.chatId, embed: { description: text, color: 0x888888 } });
@@ -922,7 +873,7 @@ export class BridgeManager {
         return true;
       }
       case '/stop': {
-        const chatKey = this.stateKey(msg.channelType, msg.chatId);
+        const chatKey = this.state.stateKey(msg.channelType, msg.chatId);
         const ctrl = this.activeControls.get(chatKey);
         if (ctrl) {
           await ctrl.interrupt();
@@ -936,12 +887,12 @@ export class BridgeManager {
         const LEVELS = ['low', 'medium', 'high', 'max'] as const;
         const level = parts[1]?.toLowerCase();
         if (level && LEVELS.includes(level as typeof LEVELS[number])) {
-          this.setEffort(msg.channelType, msg.chatId, level as typeof LEVELS[number]);
+          this.state.setEffort(msg.channelType, msg.chatId, level as typeof LEVELS[number]);
           const icons: Record<string, string> = { low: '⚡', medium: '🧠', high: '💪', max: '🔥' };
           const text = `${icons[level] || '🧠'} Effort: **${level}**`;
           await adapter.send({ chatId: msg.chatId, text });
         } else {
-          const current = this.getEffort(msg.channelType, msg.chatId) || 'default';
+          const current = this.state.getEffort(msg.channelType, msg.chatId) || 'default';
           const text = `🧠 Effort: **${current}**\nUsage: \`/effort low|medium|high|max\`\nlow = fast · medium = balanced · high = thorough · max = maximum`;
           await adapter.send({ chatId: msg.chatId, text });
         }
@@ -1034,7 +985,7 @@ export class BridgeManager {
 
         const target = sorted[idx - 1];
         await this.router.rebind(msg.channelType, msg.chatId, target.id);
-        this.clearLastActive(msg.channelType, msg.chatId);
+        this.state.clearLastActive(msg.channelType, msg.chatId);
 
         const msgs = await store.getMessages(target.id);
         const firstUser = msgs.find(m => m.role === 'user');

@@ -91,21 +91,68 @@ No element-level updates. Use `editMessageText` / embed edit to replace the enti
 | Telegram | 4,096 chars | Smaller window (5 entries), truncate tool args |
 | Discord | 6,000 chars embed | Medium window (6 entries) |
 
-## Tool Log Entry Format
+## Display Format (matching terminal)
+
+### Tool Calls — tree structure with results
 
 ```
-✅ Bash(npm run test) → 12 passed          # completed with short result
-✅ Read(package.json)                        # completed, no result shown
-❌ Write(/tmp/test.txt) → denied             # permission denied
-🔄 Bash(npm run build)                      # currently running
-⏳ Bash(npm run build) 8s                   # long-running (>3s shows elapsed)
+● Explore(Explore TermLive codebase)
+├  Done (42 tool uses · 52.3k tokens · 1m 50s)
+
+● Bash(npm test 2>&1 | tail -40)
+├  + Received:
+│    false
+│    … +24 lines
+
+● TermLive 项目全面检查报告
+  项目概况
+  TermLive (tlive) v0.2.9 — AI 编码工具的终端监控...
 ```
 
-- Tool name + truncated args (max 60 chars)
-- Optional short result after `→` (first line, max 40 chars)
-- Status icon: ✅ done, ❌ denied, 🔄 running, ⏳ long-running
+Each entry is a **block**:
+- `●` prefix = top-level tool call or text block
+- `├ └ │` tree connectors for nested results
+- Agent subagents show as nested trees with their own tool calls
+- Text output from Claude shown as a block with `●` prefix (no tool header)
 
-## Permission Prompt Format
+### Agent / Subagent nesting
+
+```
+● Running 2 Explore agents...
+├─ Read failing test files · 5 tool uses · 13.0k tokens
+│    Reading 5 files...
+├─ Read source files for tests · 10 tool uses · 44.6k tokens
+│    Reading 10 files...
+
+● Let me先详细了解失败的测试和对应的源码。
+```
+
+- Parent agent shows as a header with child count
+- Child agents show with `├─` nesting, stats inline
+- Progress shown under each child (`Reading 5 files...`)
+
+### Status indicators
+
+```
+●  — completed tool/text block
+🔄 — currently running (replaces ● while executing)
+*  — thinking/processing (like terminal's "Skedaddling...")
+```
+
+### Tool result format
+
+| Scenario | Display |
+|---------|---------|
+| Bash with output | `● Bash(cmd)\n├  output preview\n│  … +N lines` |
+| Read file | `● Read(filename.ts)` (no output shown) |
+| Agent completed | `● AgentName(desc)\n├  Done (N tools · Nk tokens · Ns)` |
+| Agent running | `🔄 Running N agents...\n├─ child1\n├─ child2` |
+| Text from Claude | `● Text content here...` |
+| Error | `● Bash(cmd)\n├  ❌ Error: message` |
+
+### Permission Prompt (inline, blocking)
+
+Appears at bottom of card when canUseTool fires:
 
 ```
 ━━━━━━━━━━━━━━━━━━
@@ -116,16 +163,14 @@ No element-level updates. Use `editMessageText` / embed edit to replace the enti
 [✅ Yes] [📌 Always] [❌ No]
 ```
 
-- Separator line above
-- Tool name as header
-- Full command/input (not truncated — user needs to see what they're approving)
+- Full command shown (user needs to see what they're approving)
 - SDK's `decisionReason` as description
 - Three buttons
 
 ### After Approval
-- Entire permission section (separator + prompt + buttons) is removed
-- The approved tool appears in the tool log as a normal `✅` entry
-- Card content updates in one editMessage call
+- Entire permission section (separator + prompt + buttons) removed
+- Tool appears in log as normal `● Bash(...)` entry with result
+- Single editMessage call updates the card
 
 ## Implementation Architecture
 

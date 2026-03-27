@@ -254,10 +254,7 @@ describe('BridgeManager', () => {
       manager.registerAdapter(adapter);
 
       // Simulate a tracked hook message and mark core as available
-      (manager as any).hookMessages.set('hook-msg-1', {
-        sessionId: 'session-abc',
-        timestamp: Date.now(),
-      });
+      manager.trackHookMessage('hook-msg-1', 'session-abc');
       (manager as any).coreAvailable = true;
 
       const originalFetch = global.fetch;
@@ -328,8 +325,9 @@ describe('BridgeManager', () => {
       });
 
       // mockAdapter.send returns { messageId: '1' }
-      expect((manager as any).hookMessages.has('1')).toBe(true);
-      expect((manager as any).hookMessages.get('1').sessionId).toBe('sess-1');
+      // hookMessages now live inside PermissionCoordinator
+      expect((manager as any).permissions.isHookMessage('1')).toBe(true);
+      expect((manager as any).permissions.getHookMessage('1').sessionId).toBe('sess-1');
     });
   });
 

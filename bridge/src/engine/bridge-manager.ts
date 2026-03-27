@@ -11,6 +11,7 @@ import { markdownToTelegram } from '../markdown/index.js';
 import { downgradeHeadings } from '../markdown/feishu.js';
 import { TerminalCardRenderer, type VerboseLevel } from './terminal-card-renderer.js';
 import { SessionStateManager } from './session-state.js';
+import { PermissionCoordinator } from './permission-coordinator.js';
 import type { FeishuStreamingSession } from '../channels/feishu-streaming.js';
 import { CostTracker } from './cost-tracker.js';
 import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from 'node:fs';
@@ -61,35 +62,27 @@ export class BridgeManager {
   private engine = new ConversationEngine();
   private router = new ChannelRouter();
   private delivery = new DeliveryLayer();
-  private gateway = new PendingPermissions();
-  private broker: PermissionBroker;
   private coreUrl: string;
   private token: string;
   private coreAvailable = false;
   private state = new SessionStateManager();
-  /** Track pending SDK permission IDs per chat for text-based resolution (key: stateKey, value: permId) */
-  private pendingSdkPerms = new Map<string, string>();
+  private permissions: PermissionCoordinator;
   /** Active query controls per chat — for /stop command */
   private activeControls = new Map<string, import('../providers/base.js').QueryControls>();
   private lastChatId = new Map<string, string>();
-  /** Deduplicate hook permission resolutions (with timestamp for TTL cleanup) */
-  private resolvedHookIds = new Map<string, number>();
-  /** Store original permission card text for card updates after approval (with timestamp) */
-  private hookPermissionTexts = new Map<string, { text: string; ts: number }>();
   /** Pending image attachments waiting for a text message to merge with (key: channelType:chatId) */
   private pendingAttachments = new Map<string, { attachments: import('../channels/types.js').FileAttachment[]; timestamp: number }>();
-  private hookMessages = new Map<string, { sessionId: string; timestamp: number }>();
-  private permissionMessages = new Map<string, { permissionId: string; sessionId: string; timestamp: number }>();
-  private latestPermission = new Map<string, { permissionId: string; sessionId: string; messageId: string }>();
 
   private chatIdFile: string;
 
   constructor() {
     const config = loadConfig();
     const effectivePublicUrl = config.publicUrl || `http://${getLocalIP()}:${config.port || 8080}`;
-    this.broker = new PermissionBroker(this.gateway, effectivePublicUrl);
+    const gateway = new PendingPermissions();
+    const broker = new PermissionBroker(gateway, effectivePublicUrl);
     this.coreUrl = config.coreUrl;
     this.token = config.token;
+    this.permissions = new PermissionCoordinator(gateway, broker, this.coreUrl, this.token);
     // Load persisted chatIds (so hook routing works without needing a message first)
     this.chatIdFile = join(homedir(), '.tlive', 'runtime', 'chat-ids.json');
     try {
@@ -115,7 +108,20 @@ export class BridgeManager {
     return this.lastChatId.get(channelType) ?? '';
   }
 
+  /** Delegate: track a hook message for reply routing */
+  trackHookMessage(messageId: string, sessionId: string): void {
+    this.permissions.trackHookMessage(messageId, sessionId);
+  }
 
+  /** Delegate: track a permission message for text-based approval */
+  trackPermissionMessage(messageId: string, permissionId: string, sessionId: string, channelType: string): void {
+    this.permissions.trackPermissionMessage(messageId, permissionId, sessionId, channelType);
+  }
+
+  /** Delegate: store original permission card text */
+  storeHookPermissionText(hookId: string, text: string): void {
+    this.permissions.storeHookPermissionText(hookId, text);
+  }
 
   registerAdapter(adapter: BaseChannelAdapter): void {
     this.adapters.set(adapter.channelType, adapter);
@@ -133,56 +139,10 @@ export class BridgeManager {
 
   async stop(): Promise<void> {
     this.running = false;
-    this.gateway.denyAll();
+    this.permissions.getGateway().denyAll();
     for (const adapter of this.adapters.values()) {
       await adapter.stop();
     }
-  }
-
-  /** Track a hook message for reply routing */
-  trackHookMessage(messageId: string, sessionId: string): void {
-    // Track even without sessionId — reply routing will send to PTY if session exists,
-    // and the tracking prevents the reply from being misrouted to the Bridge LLM.
-    this.hookMessages.set(messageId, { sessionId: sessionId || '', timestamp: Date.now() });
-    // Prune entries older than 24h
-    for (const [id, entry] of this.hookMessages) {
-      if (Date.now() - entry.timestamp > 24 * 60 * 60 * 1000) this.hookMessages.delete(id);
-    }
-  }
-
-  /** Track a permission message for text-based approval (Feishu) */
-  trackPermissionMessage(messageId: string, permissionId: string, sessionId: string, channelType: string): void {
-    this.permissionMessages.set(messageId, { permissionId, sessionId, timestamp: Date.now() });
-    this.latestPermission.set(channelType, { permissionId, sessionId, messageId });
-    for (const [id, entry] of this.permissionMessages) {
-      if (Date.now() - entry.timestamp > 24 * 60 * 60 * 1000) this.permissionMessages.delete(id);
-    }
-  }
-
-  /** Store original permission card text for later card update */
-  storeHookPermissionText(hookId: string, text: string): void {
-    this.hookPermissionTexts.set(hookId, { text, ts: Date.now() });
-    this.pruneStaleEntries();
-  }
-
-  /** Clean up stale entries older than 1 hour */
-  private pruneStaleEntries(): void {
-    const cutoff = Date.now() - 60 * 60 * 1000;
-    for (const [id, ts] of this.resolvedHookIds) {
-      if (ts < cutoff) this.resolvedHookIds.delete(id);
-    }
-    for (const [id, entry] of this.hookPermissionTexts) {
-      if (entry.ts < cutoff) this.hookPermissionTexts.delete(id);
-    }
-  }
-
-  /** Parse text as a permission decision */
-  private parsePermissionText(text: string): string | null {
-    const t = text.trim().toLowerCase();
-    if (['allow', 'a', 'yes', 'y', '允许', '通过'].includes(t)) return 'allow';
-    if (['deny', 'd', 'no', 'n', '拒绝', '否'].includes(t)) return 'deny';
-    if (['always', '始终允许'].includes(t)) return 'allow_always';
-    return null;
   }
 
   /** Send a hook notification to IM with [Local] prefix and track for reply routing */
@@ -227,7 +187,7 @@ export class BridgeManager {
       receiveIdType,
     };
     const result = await adapter.send(outMsg);
-    this.trackHookMessage(result.messageId, hook.tlive_session_id || '');
+    this.permissions.trackHookMessage(result.messageId, hook.tlive_session_id || '');
   }
 
   private async runAdapterLoop(adapter: BaseChannelAdapter): Promise<void> {
@@ -240,7 +200,7 @@ export class BridgeManager {
       // block the loop while waiting for LLM responses or permission approvals.
       const isQuickMessage = !!msg.callbackData
         || (msg.text && QUICK_COMMANDS.has(msg.text.split(' ')[0].toLowerCase()))
-        || this.parsePermissionText(msg.text || '') !== null;
+        || this.permissions.parsePermissionText(msg.text || '') !== null;
       if (isQuickMessage) {
         try {
           await this.handleInboundMessage(adapter, msg);
@@ -320,53 +280,31 @@ export class BridgeManager {
 
     // Text-based permission resolution (all platforms — fallback when buttons expire)
     if (msg.text) {
-      const decision = this.parsePermissionText(msg.text);
+      const decision = this.permissions.parsePermissionText(msg.text);
       if (decision) {
         // 1. Try SDK permission gateway — scoped to THIS chat only
         const chatKey = this.state.stateKey(msg.channelType, msg.chatId);
-        const pendingPermId = this.pendingSdkPerms.get(chatKey);
-        if (pendingPermId) {
-          const gwDecision = decision === 'deny' ? 'deny' as const
-            : decision === 'allow_always' ? 'allow_always' as const
-            : 'allow' as const;
-          if (this.gateway.resolve(pendingPermId, gwDecision)) {
-            this.pendingSdkPerms.delete(chatKey);
-            // Brief reaction instead of a full card — avoids flooding
-            const emoji = decision === 'deny' ? 'NO' : decision === 'allow_always' ? 'DONE' : 'OK';
-            adapter.addReaction(msg.chatId, msg.messageId, emoji).catch(() => {});
-            return true;
-          }
+        if (this.permissions.tryResolveByText(chatKey, decision)) {
+          // Brief reaction instead of a full card — avoids flooding
+          const emoji = decision === 'deny' ? 'NO' : decision === 'allow_always' ? 'DONE' : 'OK';
+          adapter.addReaction(msg.chatId, msg.messageId, emoji).catch(() => {});
+          return true;
         }
 
         // 2. Try hook permission (via Go Core)
-        let permEntry = msg.replyToMessageId ? this.permissionMessages.get(msg.replyToMessageId) : undefined;
-        if (!permEntry) {
-          if (this.permissionMessages.size === 1) {
-            const latest = this.latestPermission.get(adapter.channelType);
-            if (latest) permEntry = this.permissionMessages.get(latest.messageId);
-          } else if (this.permissionMessages.size > 1) {
-            const hint = adapter.channelType === 'feishu'
-              ? '⚠️ 多个权限待审批，请引用回复具体的权限消息'
-              : '⚠️ Multiple permissions pending — reply to the specific permission message';
-            await adapter.send({ chatId: msg.chatId, text: hint });
-            return true;
-          }
+        if (this.permissions.pendingPermissionCount() > 1 && !msg.replyToMessageId) {
+          const hint = adapter.channelType === 'feishu'
+            ? '⚠️ 多个权限待审批，请引用回复具体的权限消息'
+            : '⚠️ Multiple permissions pending — reply to the specific permission message';
+          await adapter.send({ chatId: msg.chatId, text: hint });
+          return true;
         }
+        const permEntry = this.permissions.findHookPermission(msg.replyToMessageId, adapter.channelType);
         if (permEntry && this.coreAvailable) {
           try {
-            await fetch(`${this.coreUrl}/api/hooks/permission/${permEntry.permissionId}/resolve`, {
-              method: 'POST',
-              headers: { Authorization: `Bearer ${this.token}`, 'Content-Type': 'application/json' },
-              body: JSON.stringify({ decision }),
-              signal: AbortSignal.timeout(5000),
-            });
+            await this.permissions.resolveHookPermission(permEntry.permissionId, decision, adapter.channelType, this.coreAvailable);
             const label = decision === 'deny' ? '❌ Denied' : decision === 'allow_always' ? '📌 Always allowed' : '✅ Allowed';
             await adapter.send({ chatId: msg.chatId, text: label });
-            for (const [id, e] of this.permissionMessages) {
-              if (e.permissionId === permEntry.permissionId) this.permissionMessages.delete(id);
-            }
-            const latest = this.latestPermission.get(adapter.channelType);
-            if (latest?.permissionId === permEntry.permissionId) this.latestPermission.delete(adapter.channelType);
           } catch (err) {
             await adapter.send({ chatId: msg.chatId, text: `❌ Failed to resolve: ${err}` });
           }
@@ -376,8 +314,8 @@ export class BridgeManager {
     }
 
     // Reply routing: quote-reply to a hook message → send to PTY stdin
-    if ((msg.text || msg.attachments?.length) && msg.replyToMessageId && this.hookMessages.has(msg.replyToMessageId)) {
-      const entry = this.hookMessages.get(msg.replyToMessageId)!;
+    if ((msg.text || msg.attachments?.length) && msg.replyToMessageId && this.permissions.isHookMessage(msg.replyToMessageId)) {
+      const entry = this.permissions.getHookMessage(msg.replyToMessageId)!;
       if (entry.sessionId && this.coreAvailable) {
         try {
           // If images attached, save as temp files and include paths in the text
@@ -433,59 +371,13 @@ export class BridgeManager {
         const decision = parts[1]; // allow, allow_always, or deny
         const hookId = parts[2];
         const sessionId = parts[3] || '';
-
-        // Deduplicate: skip if already resolved
-        if (this.resolvedHookIds.has(hookId)) return true;
-        this.resolvedHookIds.set(hookId, Date.now());
-
-        if (this.coreAvailable) {
-          try {
-            await fetch(`${this.coreUrl}/api/hooks/permission/${hookId}/resolve`, {
-              method: 'POST',
-              headers: {
-                Authorization: `Bearer ${this.token}`,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({ decision }),
-              signal: AbortSignal.timeout(5000),
-            });
-            const labels: Record<string, string> = {
-              allow: '✅ Allowed',
-              allow_always: '📌 Always Allowed',
-              deny: '❌ Denied',
-            };
-            const label = labels[decision] || '✅ Allowed';
-            // Rebuild original permission text + disabled buttons showing result
-            const permEntry = this.permissionMessages.get(msg.messageId);
-            const originalText = this.hookPermissionTexts.get(hookId)?.text || '';
-            this.hookPermissionTexts.delete(hookId);
-            await adapter.editMessage(msg.chatId, msg.messageId, {
-              chatId: msg.chatId,
-              text: originalText + `\n\n${label}`,
-              feishuHeader: {
-                template: decision === 'deny' ? 'red' : 'green',
-                title: label,
-              },
-              // No buttons — they're removed after approval
-            });
-            // Use messageId from edited card for reply tracking
-            const confirmResult = { messageId: msg.messageId, success: true };
-            // Track confirmation message for reply routing
-            if (sessionId) {
-              this.trackHookMessage(confirmResult.messageId, sessionId);
-            }
-          } catch (err) {
-            await adapter.send({ chatId: msg.chatId, text: `❌ Failed to resolve: ${err}` });
-          }
-        } else {
-          await adapter.send({ chatId: msg.chatId, text: '❌ Go Core not available' });
-        }
+        await this.permissions.resolveHookCallback(hookId, decision, sessionId, msg.messageId, adapter, msg.chatId, this.coreAvailable);
         return true;
       }
 
       // Regular permission broker callbacks (perm:allow:ID, perm:deny:ID, perm:allow_session:ID)
-      console.log(`[bridge] Perm callback: ${msg.callbackData}, gateway pending: ${this.gateway.pendingCount()}`);
-      const resolved = this.broker.handlePermissionCallback(msg.callbackData);
+      console.log(`[bridge] Perm callback: ${msg.callbackData}, gateway pending: ${this.permissions.getGateway().pendingCount()}`);
+      const resolved = this.permissions.handleBrokerCallback(msg.callbackData);
       console.log(`[bridge] Perm resolved: ${resolved}`);
       // Shrink the card to a single line — no "撤回" notice, no flooding.
       if (msg.messageId) {
@@ -618,14 +510,14 @@ export class BridgeManager {
       ? async (toolName: string, toolInput: Record<string, unknown>, promptSentence: string, signal?: AbortSignal) => {
           const permId = `sdk-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
           const chatKey = this.state.stateKey(msg.channelType, msg.chatId);
-          this.pendingSdkPerms.set(chatKey, permId);
+          this.permissions.setPendingSdkPerm(chatKey, permId);
           console.log(`[bridge] Permission request: ${toolName} (${permId}) for ${chatKey}`);
 
           // If SDK aborts (subagent stopped), clean up gateway entry immediately
           const abortCleanup = () => {
             console.log(`[bridge] Permission cancelled by SDK: ${toolName} (${permId})`);
-            this.gateway.resolve(permId, 'deny', 'Cancelled by SDK');
-            this.pendingSdkPerms.delete(chatKey);
+            this.permissions.getGateway().resolve(permId, 'deny', 'Cancelled by SDK');
+            this.permissions.clearPendingSdkPerm(chatKey);
           };
           if (signal?.aborted) { abortCleanup(); return 'deny' as const; }
           signal?.addEventListener('abort', abortCleanup, { once: true });
@@ -653,16 +545,16 @@ export class BridgeManager {
           }
 
           // Wait for user response (5 min timeout)
-          const result = await this.gateway.waitFor(permId, {
+          const result = await this.permissions.getGateway().waitFor(permId, {
             timeoutMs: 5 * 60 * 1000,
             onTimeout: () => {
-              this.pendingSdkPerms.delete(chatKey);
+              this.permissions.clearPendingSdkPerm(chatKey);
               console.warn(`[bridge] Permission timeout: ${toolName} (${permId})`);
             },
           });
           signal?.removeEventListener('abort', abortCleanup);
           renderer.onPermissionResolved();
-          this.pendingSdkPerms.delete(chatKey);
+          this.permissions.clearPendingSdkPerm(chatKey);
           console.log(`[bridge] Permission resolved: ${toolName} (${permId}) → ${result.behavior}`);
           return result.behavior as 'allow' | 'allow_always' | 'deny';
         }

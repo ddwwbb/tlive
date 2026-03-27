@@ -39,6 +39,7 @@ interface ProcessMessageParams {
   onAgentProgress?: (data: { description: string; lastTool?: string; usage?: { tool_uses: number; duration_ms: number } }) => void;
   onAgentComplete?: (data: { summary: string; status: string }) => void;
   onPromptSuggestion?: (suggestion: string) => void;
+  onToolResult?: (event: { tool_use_id: string; content: string; is_error: boolean }) => void;
   onToolProgress?: (data: { toolName: string; elapsed: number }) => void;
   onRateLimit?: (data: { status: string; utilization?: number; resetsAt?: number }) => void;
   /** Receives query controls (interrupt, stopTask) when available */
@@ -142,6 +143,11 @@ export class ConversationEngine {
           case 'prompt_suggestion':
             params.onPromptSuggestion?.(event.data as string);
             break;
+          case 'tool_result': {
+            const resultData = event.data as { tool_use_id: string; content: string; is_error: boolean };
+            params.onToolResult?.(resultData);
+            break;
+          }
           case 'tool_progress':
             params.onToolProgress?.(event.data as { toolName: string; elapsed: number });
             break;

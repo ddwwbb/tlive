@@ -400,11 +400,18 @@ export class TelegramAdapter extends BaseChannelAdapter {
   }
 
   requestPairing(userId: string, chatId: string, username: string): string | null {
+    // Clean up expired entries
     for (const [code, req] of this.pendingPairings) {
-      if (req.userId === userId) {
-        if (Date.now() < req.expiresAt) return code;
-        this.pendingPairings.delete(code);
-      }
+      if (Date.now() >= req.expiresAt) this.pendingPairings.delete(code);
+    }
+    // Check existing request for this user
+    for (const [code, req] of this.pendingPairings) {
+      if (req.userId === userId) return code;
+    }
+    // Global limit
+    if (this.pendingPairings.size >= 50) {
+      console.warn('[telegram] Pairing limit reached (50 pending)');
+      return null;
     }
     const code = String(Math.floor(100000 + Math.random() * 900000));
     this.pendingPairings.set(code, {

@@ -87,7 +87,7 @@ export function loadConfig(): Config {
 
   const port = parseInt(get('TL_PORT', '8080'), 10);
 
-  return {
+  const config: Config = {
     port,
     token: get('TL_TOKEN'),
     publicUrl: get('TL_PUBLIC_URL'),
@@ -121,4 +121,34 @@ export function loadConfig(): Config {
       allowedUsers: parseList(get('TL_FS_ALLOWED_USERS')),
     },
   };
+
+  // Validate required fields
+  if (!config.token) {
+    throw new Error('Config error: TL_TOKEN is required');
+  }
+
+  for (const channel of config.enabledChannels) {
+    switch (channel) {
+      case 'telegram':
+        if (!config.telegram.botToken) {
+          throw new Error('Config error: TL_TG_BOT_TOKEN is required (telegram is in enabled channels)');
+        }
+        break;
+      case 'discord':
+        if (!config.discord.botToken) {
+          throw new Error('Config error: TL_DC_BOT_TOKEN is required (discord is in enabled channels)');
+        }
+        break;
+      case 'feishu':
+        if (!config.feishu.appId) {
+          throw new Error('Config error: TL_FS_APP_ID is required (feishu is in enabled channels)');
+        }
+        if (!config.feishu.appSecret) {
+          throw new Error('Config error: TL_FS_APP_SECRET is required (feishu is in enabled channels)');
+        }
+        break;
+    }
+  }
+
+  return config;
 }

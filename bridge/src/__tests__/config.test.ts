@@ -31,6 +31,8 @@ describe('loadConfig', () => {
 
   it('parses enabled channels', () => {
     process.env.TL_ENABLED_CHANNELS = 'telegram,discord';
+    process.env.TL_TG_BOT_TOKEN = 'tg-token';
+    process.env.TL_DC_BOT_TOKEN = 'dc-token';
     const config = loadConfig();
     expect(config.enabledChannels).toEqual(['telegram', 'discord']);
   });

@@ -28,6 +28,8 @@ export class PermissionCoordinator {
   /** Track hook messages for reply routing (permission-adjacent) */
   private hookMessages = new Map<string, { sessionId: string; timestamp: number }>();
 
+  private pruneTimer: ReturnType<typeof setInterval> | null = null;
+
   /** Dynamic session whitelist — tools approved via "Allow {tool}" button */
   private allowedTools = new Set<string>();
   /** Dynamic Bash prefix whitelist — commands approved via "Allow Bash(prefix *)" */
@@ -127,6 +129,20 @@ export class PermissionCoordinator {
   storeHookPermissionText(hookId: string, text: string): void {
     this.hookPermissionTexts.set(hookId, { text, ts: Date.now() });
     this.pruneStaleEntries();
+  }
+
+  /** Start periodic cleanup of stale entries (call from BridgeManager.start) */
+  startPruning(intervalMs = 30 * 60 * 1000): void {
+    this.stopPruning();
+    this.pruneTimer = setInterval(() => this.pruneStaleEntries(), intervalMs);
+  }
+
+  /** Stop periodic cleanup (call from BridgeManager.stop) */
+  stopPruning(): void {
+    if (this.pruneTimer) {
+      clearInterval(this.pruneTimer);
+      this.pruneTimer = null;
+    }
   }
 
   /** Clean up stale entries older than 1 hour */

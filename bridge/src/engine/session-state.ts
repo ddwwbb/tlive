@@ -11,7 +11,7 @@ export type VerboseLevel = 0 | 1;
 export class SessionStateManager {
   private verboseLevels = new Map<string, VerboseLevel>();
   private modes = new Map<string, SessionMode>();
-  private processingChats = new Set<string>();
+  private processingChats = new Map<string, number>();
   private lastActive = new Map<string, number>();
   private sessionThreads = new Map<string, string>();
   private runtimes = new Map<string, 'claude' | 'codex'>();
@@ -62,12 +62,20 @@ export class SessionStateManager {
   }
 
   isProcessing(chatKey: string): boolean {
-    return this.processingChats.has(chatKey);
+    const start = this.processingChats.get(chatKey);
+    if (!start) return false;
+    // Auto-clear after 10 minutes (handler likely crashed)
+    if (Date.now() - start > 10 * 60 * 1000) {
+      console.warn(`[session] Processing flag expired for ${chatKey} (>10min)`);
+      this.processingChats.delete(chatKey);
+      return false;
+    }
+    return true;
   }
 
   setProcessing(chatKey: string, active: boolean): void {
     if (active) {
-      this.processingChats.add(chatKey);
+      this.processingChats.set(chatKey, Date.now());
     } else {
       this.processingChats.delete(chatKey);
     }

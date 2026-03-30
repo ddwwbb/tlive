@@ -161,10 +161,12 @@ export class BridgeManager {
       await adapter.start();
       this.runAdapterLoop(adapter);
     }
+    this.permissions.startPruning();
   }
 
   async stop(): Promise<void> {
     this.running = false;
+    this.permissions.stopPruning();
     this.permissions.getGateway().denyAll();
     for (const adapter of this.adapters.values()) {
       await adapter.stop();
@@ -287,11 +289,30 @@ export class BridgeManager {
     const attachKey = `${msg.channelType}:${msg.chatId}`;
     if (msg.attachments?.length && !msg.text && !msg.callbackData) {
       // Image-only message: buffer attachments and wait for text
-      this.pendingAttachments.set(attachKey, {
-        attachments: msg.attachments,
-        timestamp: Date.now(),
-      });
-      console.log(`[${msg.channelType}] Buffered ${msg.attachments.length} attachment(s), waiting for text`);
+      // Limit: max 5 attachments, max 10MB total
+      const MAX_ATTACHMENTS = 5;
+      const MAX_TOTAL_BYTES = 10 * 1024 * 1024;
+      let attachments = msg.attachments.slice(0, MAX_ATTACHMENTS);
+      const totalBytes = attachments.reduce((sum, a) => sum + a.base64Data.length, 0);
+      if (totalBytes > MAX_TOTAL_BYTES) {
+        // Keep only attachments that fit within budget
+        let budget = MAX_TOTAL_BYTES;
+        attachments = attachments.filter(a => {
+          if (a.base64Data.length <= budget) {
+            budget -= a.base64Data.length;
+            return true;
+          }
+          return false;
+        });
+        console.warn(`[${msg.channelType}] Attachment buffer exceeded 10MB limit, kept ${attachments.length}`);
+      }
+      if (attachments.length > 0) {
+        this.pendingAttachments.set(attachKey, {
+          attachments,
+          timestamp: Date.now(),
+        });
+        console.log(`[${msg.channelType}] Buffered ${attachments.length} attachment(s), waiting for text`);
+      }
       return true;
     }
     // Merge pending attachments into current text message

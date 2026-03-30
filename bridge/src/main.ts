@@ -159,7 +159,7 @@ async function main() {
   }
 
   // Periodically re-check Core availability
-  setInterval(async () => {
+  const coreStatusInterval = setInterval(async () => {
     try {
       const resp = await fetch(`${config.coreUrl}/api/status`, {
         headers: { Authorization: `Bearer ${config.token}` },
@@ -353,6 +353,8 @@ async function main() {
     logger.info('Shutting down...');
     clearInterval(hookPollInterval);
     clearInterval(notifyPollInterval);
+    clearInterval(coreStatusInterval);
+    clearInterval(keepAliveInterval);
     writeStatusFile(tliveHome, {
       pid: process.pid,
       exitedAt: new Date().toISOString(),
@@ -369,7 +371,7 @@ async function main() {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
 
   // Keep process alive
-  setInterval(() => {}, 60_000);
+  const keepAliveInterval = setInterval(() => {}, 60_000);
 }
 
 main().catch((err) => {

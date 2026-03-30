@@ -512,19 +512,26 @@ export class BridgeManager {
     }
 
     const platformLimits: Record<string, number> = { telegram: 4096, discord: 2000, feishu: 30000 };
+    let permissionReminderMsgId: string | undefined;
+    let permissionReminderTool: string | undefined;
+    let permissionReminderInput: string | undefined;
     const renderer = new MessageRenderer({
       platformLimit: platformLimits[adapter.channelType] ?? 4096,
       throttleMs: 300,
       onPermissionTimeout: async (toolName, input, buttons) => {
-        const inputTrunc = input.length > 80 ? input.slice(0, 77) + '...' : input;
-        const text = `⚠️ Permission pending — ${toolName}: ${inputTrunc}`;
+        permissionReminderTool = toolName;
+        permissionReminderInput = input.length > 80 ? input.slice(0, 77) + '...' : input;
+        const text = `⚠️ Permission pending — ${toolName}: ${permissionReminderInput}`;
         const targetChatId = threadId && adapter.channelType === 'discord' ? threadId : msg.chatId;
         const outMsg: OutboundMessage = adapter.channelType === 'telegram'
           ? { chatId: targetChatId, html: markdownToTelegram(text) }
           : { chatId: targetChatId, text };
         outMsg.buttons = buttons.map(b => ({ ...b, style: b.style as 'primary' | 'danger' | 'default' }));
         if (threadId) outMsg.threadId = threadId;
-        adapter.send(outMsg).catch(() => {});
+        try {
+          const result = await adapter.send(outMsg);
+          permissionReminderMsgId = result.messageId;
+        } catch { /* non-fatal */ }
       },
       flushCallback: async (content, isEdit, buttons) => {
         // Feishu streaming path
@@ -635,6 +642,18 @@ export class BridgeManager {
           });
           signal?.removeEventListener('abort', abortCleanup);
           renderer.onPermissionResolved();
+
+          // Update timeout reminder message if it was sent
+          if (permissionReminderMsgId) {
+            const icon = result.behavior === 'deny' ? '❌' : '✅';
+            const label = `${permissionReminderTool}: ${permissionReminderInput} ${icon}`;
+            adapter.editMessage(msg.chatId, permissionReminderMsgId, {
+              chatId: msg.chatId,
+              text: label,
+            }).catch(() => {});
+            permissionReminderMsgId = undefined;
+          }
+
           this.permissions.clearPendingSdkPerm(chatKey);
           console.log(`[bridge] Permission resolved: ${toolName} (${permId}) → ${result.behavior}`);
           return result.behavior as 'allow' | 'allow_always' | 'deny';

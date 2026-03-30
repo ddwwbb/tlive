@@ -486,11 +486,10 @@ export class BridgeManager {
     const reactions = reactionEmojis[adapter.channelType] || reactionEmojis.telegram;
     adapter.addReaction(reactionChatId, msg.messageId, reactions.processing).catch(() => {});
 
-    // Feishu: use CardKit streaming session for smoother rendering
-    let feishuSession: FeishuStreamingSession | null = null;
-    if (adapter.channelType === 'feishu' && 'createStreamingSession' in adapter) {
-      feishuSession = (adapter as any).createStreamingSession(msg.chatId, msg.receiveIdType);
-    }
+    // Feishu streaming disabled — new renderer uses short status lines
+    // that don't benefit from streaming, and streaming cards can't be
+    // edited with im.message.patch (needed for permission buttons)
+    let feishuSession: import('../channels/feishu-streaming.js').FeishuStreamingSession | null = null;
 
     const platformLimits: Record<string, number> = { telegram: 4096, discord: 2000, feishu: 30000 };
     let permissionReminderMsgId: string | undefined;
@@ -611,24 +610,10 @@ export class BridgeManager {
           // Render permission inline in the terminal card
           const inputStr = getToolCommand(toolName, toolInput)
             || JSON.stringify(toolInput, null, 2);
-          const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
           const buttons: Array<{ label: string; callbackData: string; style: string }> = [
-            { label: '✅ Yes', callbackData: `perm:allow:${permId}`, style: 'primary' },
+            { label: '✅ Allow', callbackData: `perm:allow:${permId}`, style: 'primary' },
+            { label: '❌ Deny', callbackData: `perm:deny:${permId}`, style: 'danger' },
           ];
-
-          if (EDIT_TOOLS.has(toolName)) {
-            buttons.push({ label: '✅ Allow all edits', callbackData: `perm:allow_edits:${permId}`, style: 'default' });
-          } else if (toolName === 'Bash') {
-            const cmd = typeof toolInput.command === 'string' ? toolInput.command : '';
-            const prefix = this.permissions.extractBashPrefix(cmd);
-            if (prefix) {
-              buttons.push({ label: `✅ Bash(${prefix} *)`, callbackData: `perm:allow_bash:${permId}:${prefix}`, style: 'default' });
-            }
-          } else {
-            buttons.push({ label: `✅ Allow ${toolName}`, callbackData: `perm:allow_tool:${permId}:${toolName}`, style: 'default' });
-          }
-
-          buttons.push({ label: '❌ No', callbackData: `perm:deny:${permId}`, style: 'danger' });
           renderer.onPermissionNeeded(toolName, inputStr, permId, buttons);
 
           // Wait for user response (5 min timeout)

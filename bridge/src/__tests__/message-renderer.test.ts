@@ -205,6 +205,63 @@ describe('MessageRenderer', () => {
       expect(lastCall[2]).toBeUndefined();
       r.dispose();
     });
+
+    it('emits timeout reminder after 60s', async () => {
+      let timeoutData: { toolName: string; input: string } | null = null;
+      const r = new MessageRenderer({
+        platformLimit: 4096,
+        throttleMs: 300,
+        flushCallback: flushCallback as any,
+        onPermissionTimeout: (toolName, input, _buttons) => {
+          timeoutData = { toolName, input };
+        },
+      });
+
+      r.onToolStart('Bash');
+      await advance(300);
+
+      const buttons = [
+        { label: '✅ Yes', callbackData: 'perm:allow:123', style: 'primary' },
+        { label: '❌ No', callbackData: 'perm:deny:123', style: 'danger' },
+      ];
+      r.onPermissionNeeded('Bash', 'npm test', '123', buttons);
+
+      // Before 60s — no timeout
+      await advance(59000);
+      expect(timeoutData).toBeNull();
+
+      // At 60s — timeout fires
+      await advance(1000);
+      expect(timeoutData).toEqual({ toolName: 'Bash', input: 'npm test' });
+
+      r.onPermissionResolved();
+      r.dispose();
+    });
+
+    it('does not fire timeout if permission resolved before 60s', async () => {
+      let timeoutFired = false;
+      const r = new MessageRenderer({
+        platformLimit: 4096,
+        throttleMs: 300,
+        flushCallback: flushCallback as any,
+        onPermissionTimeout: () => { timeoutFired = true; },
+      });
+
+      r.onToolStart('Bash');
+      await advance(300);
+
+      const buttons = [
+        { label: '✅ Yes', callbackData: 'perm:allow:123', style: 'primary' },
+        { label: '❌ No', callbackData: 'perm:deny:123', style: 'danger' },
+      ];
+      r.onPermissionNeeded('Bash', 'npm test', '123', buttons);
+      await advance(30000); // 30s
+      r.onPermissionResolved();
+      await advance(60000); // well past 60s
+      expect(timeoutFired).toBe(false);
+
+      r.dispose();
+    });
   });
 
   // ─── Done phase ──────────────────────────────────

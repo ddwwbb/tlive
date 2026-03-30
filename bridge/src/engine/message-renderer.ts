@@ -10,6 +10,8 @@ export interface MessageRendererOptions {
     isEdit: boolean,
     buttons?: Array<{ label: string; callbackData: string; style: string }>,
   ) => Promise<string | void>;
+  /** Called when permission waits >60s without response */
+  onPermissionTimeout?: (toolName: string, input: string, buttons: Array<{ label: string; callbackData: string; style: string }>) => void;
 }
 
 /** Tools silently ignored — never counted or displayed */
@@ -39,10 +41,12 @@ export class MessageRenderer {
   private _messageId?: string;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private elapsedTimer: ReturnType<typeof setInterval> | null = null;
+  private permissionTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
   private elapsedSeconds = 0;
   private platformLimit: number;
   private throttleMs: number;
   private flushCallback: MessageRendererOptions['flushCallback'];
+  private onPermissionTimeout?: MessageRendererOptions['onPermissionTimeout'];
   private flushing = false;
   private pendingFlush = false;
 
@@ -54,6 +58,7 @@ export class MessageRenderer {
     this.platformLimit = options.platformLimit;
     this.throttleMs = options.throttleMs ?? 300;
     this.flushCallback = options.flushCallback;
+    this.onPermissionTimeout = options.onPermissionTimeout;
   }
 
   onToolStart(name: string): void {
@@ -84,10 +89,23 @@ export class MessageRenderer {
     buttons: Array<{ label: string; callbackData: string; style: string }>,
   ): void {
     this.pendingPermission = { toolName, input, permId, buttons };
+    this.clearPermissionTimeout();
+    if (this.onPermissionTimeout) {
+      this.permissionTimeoutTimer = setTimeout(() => {
+        if (this.pendingPermission) {
+          this.onPermissionTimeout!(
+            this.pendingPermission.toolName,
+            this.pendingPermission.input,
+            this.pendingPermission.buttons,
+          );
+        }
+      }, 60_000);
+    }
     this.scheduleFlush();
   }
 
   onPermissionResolved(): void {
+    this.clearPermissionTimeout();
     this.pendingPermission = undefined;
     this.scheduleFlush();
   }
@@ -220,6 +238,14 @@ export class MessageRenderer {
     if (this.elapsedTimer) {
       clearInterval(this.elapsedTimer);
       this.elapsedTimer = null;
+    }
+    this.clearPermissionTimeout();
+  }
+
+  private clearPermissionTimeout(): void {
+    if (this.permissionTimeoutTimer) {
+      clearTimeout(this.permissionTimeoutTimer);
+      this.permissionTimeoutTimer = null;
     }
   }
 

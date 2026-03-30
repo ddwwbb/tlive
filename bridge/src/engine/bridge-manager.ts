@@ -515,6 +515,17 @@ export class BridgeManager {
     const renderer = new MessageRenderer({
       platformLimit: platformLimits[adapter.channelType] ?? 4096,
       throttleMs: 300,
+      onPermissionTimeout: async (toolName, input, buttons) => {
+        const inputTrunc = input.length > 80 ? input.slice(0, 77) + '...' : input;
+        const text = `⚠️ Permission pending — ${toolName}: ${inputTrunc}`;
+        const targetChatId = threadId && adapter.channelType === 'discord' ? threadId : msg.chatId;
+        const outMsg: OutboundMessage = adapter.channelType === 'telegram'
+          ? { chatId: targetChatId, html: markdownToTelegram(text) }
+          : { chatId: targetChatId, text };
+        outMsg.buttons = buttons.map(b => ({ ...b, style: b.style as 'primary' | 'danger' | 'default' }));
+        if (threadId) outMsg.threadId = threadId;
+        adapter.send(outMsg).catch(() => {});
+      },
       flushCallback: async (content, isEdit, buttons) => {
         // Feishu streaming path
         if (feishuSession) {

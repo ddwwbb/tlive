@@ -1,7 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { createAdapter, getRegisteredTypes } from '../channels/index.js';
 
 describe('Channel Adapter Registry', () => {
+  beforeEach(() => {
+    process.env.TL_TOKEN = 'test-token';
+  });
   it('has all three adapters registered', () => {
     const types = getRegisteredTypes();
     expect(types).toContain('telegram');

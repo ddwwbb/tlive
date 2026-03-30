@@ -4,6 +4,10 @@ import { loadConfig } from '../config.js';
 describe('loadConfig', () => {
   const savedEnv = { ...process.env };
 
+  beforeEach(() => {
+    process.env.TL_TOKEN = 'test-token';
+  });
+
   afterEach(() => {
     // Restore env
     for (const key of Object.keys(process.env)) {

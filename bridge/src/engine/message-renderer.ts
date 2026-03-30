@@ -112,7 +112,7 @@ export class MessageRenderer {
 
   onTextDelta(text: string): void {
     this.responseText += text;
-    // No flush during accumulation
+    this.scheduleFlush();
   }
 
   onComplete(stats: UsageStats): void {
@@ -162,18 +162,28 @@ export class MessageRenderer {
   }
 
   private renderExecuting(): string {
-    if (this.totalTools === 0) {
+    if (this.totalTools === 0 && !this.responseText) {
       return '⏳ Starting...';
     }
-    const parts: string[] = [];
-    for (const [name, count] of this.toolCounts) {
-      parts.push(`${getToolIcon(name)} ${name} ×${count}`);
+    const lines: string[] = [];
+
+    // Show response text above status line if available
+    if (this.responseText.trim()) {
+      lines.push(this.responseText.trim());
+      lines.push('');
     }
-    const toolSummary = parts.join(' · ');
-    const elapsed = `${this.elapsedSeconds}s`;
-    return this.applyPlatformLimit(
-      redactSensitiveContent(`⏳ ${toolSummary} (${this.totalTools} tools · ${elapsed})`),
-    );
+
+    if (this.totalTools > 0) {
+      const parts: string[] = [];
+      for (const [name, count] of this.toolCounts) {
+        parts.push(`${getToolIcon(name)} ${name} ×${count}`);
+      }
+      const toolSummary = parts.join(' · ');
+      const elapsed = `${this.elapsedSeconds}s`;
+      lines.push(`⏳ ${toolSummary} (${this.totalTools} tools · ${elapsed})`);
+    }
+
+    return this.applyPlatformLimit(redactSensitiveContent(lines.join('\n')));
   }
 
   private renderToolSummary(): string {

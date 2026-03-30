@@ -546,13 +546,14 @@ describe('MessageRenderer', () => {
   // ─── onTextDelta ─────────────────────────────────
 
   describe('onTextDelta', () => {
-    it('does not flush during text accumulation', async () => {
+    it('flushes text during accumulation', async () => {
       const r = createRenderer();
       r.onTextDelta('hello ');
       r.onTextDelta('world');
-      await advance(5000);
-      // No flush should happen for text alone (no tool started, no elapsed timer)
-      expect(flushCallback).not.toHaveBeenCalled();
+      await advance(300);
+      expect(flushCallback).toHaveBeenCalled();
+      const content = flushCallback.mock.calls[0][0] as string;
+      expect(content).toContain('hello world');
       r.dispose();
     });
   });

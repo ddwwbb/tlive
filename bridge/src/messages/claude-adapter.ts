@@ -164,6 +164,9 @@ export class ClaudeAdapter {
           continue;
         }
 
+        // Tool use resets the streamed flag — any text after tools is new
+        this.hasStreamedText = false;
+
         const ev: CanonicalEvent = {
           kind: 'tool_start',
           id,

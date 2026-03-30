@@ -12,6 +12,7 @@ import { loadConfig } from '../config.js';
 import { markdownToTelegram } from '../markdown/index.js';
 import { downgradeHeadings } from '../markdown/feishu.js';
 import { MessageRenderer } from './message-renderer.js';
+import { getToolCommand } from './tool-registry.js';
 import { SessionStateManager } from './session-state.js';
 import { PermissionCoordinator } from './permission-coordinator.js';
 import { CommandRouter } from './command-router.js';
@@ -627,9 +628,8 @@ export class BridgeManager {
           signal?.addEventListener('abort', abortCleanup, { once: true });
 
           // Render permission inline in the terminal card
-          const inputStr = typeof toolInput === 'string'
-            ? toolInput as string
-            : JSON.stringify(toolInput, null, 2);
+          const inputStr = getToolCommand(toolName, toolInput)
+            || JSON.stringify(toolInput, null, 2);
           const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
           const buttons: Array<{ label: string; callbackData: string; style: string }> = [
             { label: '✅ Yes', callbackData: `perm:allow:${permId}`, style: 'primary' },

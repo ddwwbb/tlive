@@ -401,14 +401,11 @@ export class BridgeManager {
         return true;
       }
 
-      // Graduated permission callbacks
+      // Graduated permission callbacks — resolve gateway, no message edit
+      // (renderer.onPermissionResolved() handles the visual transition)
       if (msg.callbackData.startsWith('perm:allow_edits:')) {
         const permId = msg.callbackData.split(':').slice(2).join(':');
         this.permissions.getGateway().resolve(permId, 'allow');
-        // Edit tools allowed via acceptEdits mode — no whitelist needed, SDK handles it
-        if (msg.messageId) {
-          adapter.editMessage(msg.chatId, msg.messageId, { chatId: msg.chatId, text: '✅ Allowed (all edits)' }).catch(() => {});
-        }
         return true;
       }
 
@@ -419,9 +416,6 @@ export class BridgeManager {
         this.permissions.getGateway().resolve(permId, 'allow');
         this.permissions.addAllowedTool(toolName);
         console.log(`[bridge] Added ${toolName} to session whitelist`);
-        if (msg.messageId) {
-          adapter.editMessage(msg.chatId, msg.messageId, { chatId: msg.chatId, text: `✅ Allowed (${toolName} for session)` }).catch(() => {});
-        }
         return true;
       }
 
@@ -432,26 +426,13 @@ export class BridgeManager {
         this.permissions.getGateway().resolve(permId, 'allow');
         this.permissions.addAllowedBashPrefix(prefix);
         console.log(`[bridge] Added Bash(${prefix} *) to session whitelist`);
-        if (msg.messageId) {
-          adapter.editMessage(msg.chatId, msg.messageId, { chatId: msg.chatId, text: `✅ Allowed (Bash ${prefix} * for session)` }).catch(() => {});
-        }
         return true;
       }
 
-      // Regular permission broker callbacks (perm:allow:ID, perm:deny:ID, perm:allow_session:ID)
+      // Regular permission broker callbacks (perm:allow:ID, perm:deny:ID)
       console.log(`[bridge] Perm callback: ${msg.callbackData}, gateway pending: ${this.permissions.getGateway().pendingCount()}`);
-      const resolved = this.permissions.handleBrokerCallback(msg.callbackData);
-      console.log(`[bridge] Perm resolved: ${resolved}`);
-      // Shrink the card to a single line — no "撤回" notice, no flooding.
-      if (msg.messageId) {
-        const action = resolved ? (msg.callbackData.split(':')[1] || 'allow') : 'expired';
-        const label = action === 'deny' ? '❌' : action === 'allow_session' ? '📌' : action === 'expired' ? '⏳' : '✅';
-        adapter.editMessage(msg.chatId, msg.messageId, {
-          chatId: msg.chatId,
-          text: label,
-        }).catch(() => {});
-      }
-      // If not resolved (expired/cancelled), silently ignore
+      this.permissions.handleBrokerCallback(msg.callbackData);
+      // No message edit — renderer.onPermissionResolved() morphs back to status line
       return true;
     }
 

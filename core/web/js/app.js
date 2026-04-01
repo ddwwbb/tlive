@@ -122,12 +122,14 @@
                     var termUrl = '/terminal.html?id=' + s.id + (tokenParam ? '&token=' + encodeURIComponent(tokenParam) : '');
                     var statusClass = isRunning ? 'running' : 'exited';
 
+                    var cwdTag = s.cwd ? '<span class="meta-cwd">' + escapeHtml(s.cwd) + '</span>' : '';
+
                     return '<div class="session-card ' + statusClass + '" onclick="location.href=\'' + termUrl + '\'">' +
                         '<div class="card-header">' +
                             '<span class="name">' + escapeHtml(s.command) + '</span>' +
                             '<span class="card-status ' + statusClass + '">' + escapeHtml(s.status) + '</span>' +
                         '</div>' +
-                        '<div class="meta">PID ' + s.pid + ' &middot; ' + escapeHtml(s.duration) + '</div>' +
+                        '<div class="meta">' + cwdTag + 'PID ' + s.pid + ' &middot; ' + escapeHtml(s.duration) + '</div>' +
                         '<pre class="preview" data-idx="' + i + '" style="display:none"></pre>' +
                         '</div>';
                 }).join('');

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -78,10 +80,13 @@ func (m *SessionManager) CreateSession(cmd string, args []string, cfg SessionCon
 		return nil, fmt.Errorf("pty start: %w", err)
 	}
 
-	// 4. Set session PID and size
+	// 4. Set session PID, size, and working directory
 	sess.Pid = proc.Pid()
 	sess.Rows = cfg.Rows
 	sess.Cols = cfg.Cols
+	if cwd, err := os.Getwd(); err == nil {
+		sess.Cwd = filepath.Base(cwd)
+	}
 
 	// 5. Set hub input handler to write to PTY
 	h.SetInputHandler(func(data []byte) {
@@ -95,6 +100,12 @@ func (m *SessionManager) CreateSession(cmd string, args []string, cfg SessionCon
 		Hub:     h,
 		Proc:    proc,
 		done:    make(chan struct{}),
+		resizeFn: func(rows, cols uint16) {
+			if err := proc.Resize(rows, cols); err != nil {
+				log.Printf("resize PTY: %v", err)
+			}
+			sess.SetSize(rows, cols)
+		},
 	}
 
 	// 6. Goroutine: PTY output -> hub.Broadcast + sess.AppendOutput

@@ -125,9 +125,8 @@ func runHost(cfg *config.Config, args []string, rows, cols uint16, lockPath stri
 		localIP = getLocalIP()
 	}
 	srv := server.New(mgr)
-	// Host mode: local terminal owns PTY size, ignore web resize
-	// Web xterm.js will adapt to whatever PTY size the local terminal sets
-	mgr.SetResizeFunc(ms.Session.ID, nil)
+	// Let web clients resize the PTY so programs re-render at the viewer's width
+	// (e.g. separator lines adapt to mobile screen width)
 	srv.SetWebFS(web.Assets)
 	d.SetExtraHandler(srv.Handler())
 

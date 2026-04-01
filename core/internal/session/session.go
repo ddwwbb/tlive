@@ -4,6 +4,7 @@ package session
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"sort"
 	"sync"
 	"time"
 )
@@ -26,6 +27,7 @@ type Session struct {
 	StartTime time.Time
 	Rows      uint16
 	Cols      uint16
+	Cwd       string
 	mu        sync.Mutex
 	output    []byte
 }
@@ -121,5 +123,8 @@ func (st *Store) List() []*Session {
 	for _, s := range st.sessions {
 		result = append(result, s)
 	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].StartTime.Before(result[j].StartTime)
+	})
 	return result
 }

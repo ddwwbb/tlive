@@ -43,6 +43,16 @@
     var reconnectTimer = null;
     var processExited = false;
 
+    function sendResize() {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                type: 'resize',
+                rows: term.rows,
+                cols: term.cols,
+            }));
+        }
+    }
+
     function setConnected(connected) {
         if (connected) {
             statusBadge.className = 'status-badge online';
@@ -62,6 +72,7 @@
         ws.onopen = function() {
             setConnected(true);
             fitAddon.fit();
+            sendResize();
         };
 
         ws.onmessage = function(event) {
@@ -73,8 +84,8 @@
                         showExitOverlay(ctrl.code);
                         return;
                     }
-                    // Ignore size messages — web viewer fits to its own viewport
                     if (ctrl.type === 'size') {
+                        // Ignore server size — we tell the PTY our size, not the other way
                         return;
                     }
                 } catch(e) { /* not JSON, treat as terminal data */ }
@@ -98,6 +109,10 @@
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(data);
         }
+    });
+
+    term.onResize(function() {
+        sendResize();
     });
 
     window.addEventListener('resize', function() {

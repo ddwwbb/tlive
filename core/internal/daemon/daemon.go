@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // DaemonConfig holds configuration for the daemon HTTP server.
@@ -248,6 +249,7 @@ func (d *Daemon) handleListSessions(w http.ResponseWriter, r *http.Request) {
 		Pid        int    `json:"pid"`
 		Status     string `json:"status"`
 		Duration   string `json:"duration"`
+		Cwd        string `json:"cwd"`
 		LastOutput string `json:"last_output"`
 		PreviewRaw string `json:"preview_raw"`
 		Rows       uint16 `json:"rows"`
@@ -255,7 +257,11 @@ func (d *Daemon) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	}
 	infos := make([]sessionInfo, len(sessions))
 	for i, s := range sessions {
-		rawOutput := s.LastOutput(4096)
+		rawOutput := s.LastOutput(8192)
+		// Align to valid UTF-8 boundary to avoid splitting multi-byte characters
+		for len(rawOutput) > 0 && !utf8.RuneStart(rawOutput[0]) {
+			rawOutput = rawOutput[1:]
+		}
 		rows, cols := s.Size()
 		infos[i] = sessionInfo{
 			ID:         s.ID,
@@ -263,6 +269,7 @@ func (d *Daemon) handleListSessions(w http.ResponseWriter, r *http.Request) {
 			Pid:        s.Pid,
 			Status:     string(s.Status),
 			Duration:   s.Duration().Truncate(time.Second).String(),
+			Cwd:        s.Cwd,
 			LastOutput: stripANSI(string(s.LastOutput(200))),
 			PreviewRaw: base64.StdEncoding.EncodeToString(rawOutput),
 			Rows:       rows,

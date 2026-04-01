@@ -357,6 +357,54 @@ describe('ClaudeAdapter', () => {
 
       expect(events[0]).toMatchObject({ kind: 'error', message: 'Unknown error' });
     });
+
+    it('maps interrupt result to query_result + clean error message', () => {
+      const events = adapter.mapMessage({
+        type: 'result',
+        subtype: 'error_during_execution',
+        session_id: 'sess_int',
+        is_error: true,
+        usage: { input_tokens: 500, output_tokens: 200 },
+        total_cost_usd: 0.01,
+        errors: ['[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=null'],
+      });
+
+      // Should emit query_result (for usage tracking) + clean "Interrupted" error
+      expect(events).toHaveLength(2);
+      expect(events[0]).toMatchObject({
+        kind: 'query_result',
+        sessionId: 'sess_int',
+        isError: true,
+        usage: { inputTokens: 500, outputTokens: 200, costUsd: 0.01 },
+      });
+      expect(events[1]).toMatchObject({
+        kind: 'error',
+        message: 'Interrupted',
+      });
+    });
+
+    it('maps non-interrupt error_during_execution to both query_result and error', () => {
+      const events = adapter.mapMessage({
+        type: 'result',
+        subtype: 'error_during_execution',
+        session_id: 'sess_err',
+        is_error: true,
+        usage: { input_tokens: 300, output_tokens: 100 },
+        total_cost_usd: 0.008,
+        errors: ['Process crashed unexpectedly'],
+      });
+
+      expect(events).toHaveLength(2);
+      expect(events[0]).toMatchObject({
+        kind: 'query_result',
+        isError: true,
+        usage: { inputTokens: 300, outputTokens: 100 },
+      });
+      expect(events[1]).toMatchObject({
+        kind: 'error',
+        message: 'Process crashed unexpectedly',
+      });
+    });
   });
 
   // ── 10. system → status, agent_start, agent_progress, agent_complete ──

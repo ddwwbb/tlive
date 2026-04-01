@@ -272,8 +272,8 @@ export class ClaudeSDKProvider implements LLMProvider {
 
             // Expose query controls for interrupt/stopTask
             controls = {
-              interrupt: () => (q as any).interrupt?.() ?? Promise.resolve(),
-              stopTask: (taskId: string) => (q as any).stopTask?.(taskId) ?? Promise.resolve(),
+              interrupt: async () => { await (q as any).interrupt?.(); },
+              stopTask: async (taskId: string) => { await (q as any).stopTask?.(taskId); },
             };
 
             const adapter = new ClaudeAdapter();

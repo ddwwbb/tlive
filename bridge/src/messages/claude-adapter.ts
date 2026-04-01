@@ -231,15 +231,15 @@ export class ClaudeAdapter {
     msg: SDKMessage,
     events: CanonicalEvent[],
   ): void {
-    if (msg.subtype === 'success') {
-      const usage = msg.usage as { input_tokens: number; output_tokens: number } | undefined;
-      const denials = Array.isArray(msg.permission_denials)
-        ? (msg.permission_denials as Array<{ tool_name: string; tool_use_id: string }>).map(d => ({
-          toolName: d.tool_name,
-          toolUseId: d.tool_use_id,
-        }))
-        : undefined;
+    const usage = msg.usage as { input_tokens: number; output_tokens: number } | undefined;
+    const denials = Array.isArray(msg.permission_denials)
+      ? (msg.permission_denials as Array<{ tool_name: string; tool_use_id: string }>).map(d => ({
+        toolName: d.tool_name,
+        toolUseId: d.tool_use_id,
+      }))
+      : undefined;
 
+    if (msg.subtype === 'success') {
       const ev: CanonicalEvent = {
         kind: 'query_result',
         sessionId: msg.session_id as string,
@@ -253,14 +253,33 @@ export class ClaudeAdapter {
       };
       events.push(ev);
     } else {
-      const errors = Array.isArray(msg.errors)
-        ? (msg.errors as string[]).join('; ')
-        : 'Unknown error';
-      const ev: CanonicalEvent = {
-        kind: 'error',
-        message: errors,
-      };
-      events.push(ev);
+      // Check if this is a user-initiated interrupt (e.g. /stop command)
+      const errors = Array.isArray(msg.errors) ? msg.errors as string[] : [];
+      const isInterrupt = errors.some(e => typeof e === 'string' && e.includes('result_type=user'));
+
+      // Emit query_result with usage data so cost tracking works
+      if (usage) {
+        const ev: CanonicalEvent = {
+          kind: 'query_result',
+          sessionId: msg.session_id as string,
+          isError: true,
+          usage: {
+            inputTokens: usage.input_tokens ?? 0,
+            outputTokens: usage.output_tokens ?? 0,
+            ...(msg.total_cost_usd != null ? { costUsd: msg.total_cost_usd as number } : {}),
+          },
+          ...(denials && denials.length > 0 ? { permissionDenials: denials } : {}),
+        };
+        events.push(ev);
+      }
+
+      // For interrupts, emit a clean message instead of raw SDK diagnostics
+      if (isInterrupt) {
+        events.push({ kind: 'error', message: 'Interrupted' } as CanonicalEvent);
+      } else {
+        const errorMsg = errors.length > 0 ? errors.join('; ') : 'Unknown error';
+        events.push({ kind: 'error', message: errorMsg } as CanonicalEvent);
+      }
     }
   }
 

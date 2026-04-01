@@ -222,7 +222,12 @@ export class MessageRenderer {
       }
       lines.push('⚠️ Stopped');
       lines.push(SEPARATOR);
-      lines.push(this.renderToolSummary());
+      if (this.totalTools > 0) {
+        lines.push(this.renderToolSummary());
+      }
+      if (this.costLine) {
+        lines.push(this.costLine);
+      }
       return this.applyPlatformLimit(redactSensitiveContent(lines.join('\n')));
     }
 

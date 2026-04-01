@@ -135,6 +135,7 @@ export class CommandRouter {
         const chatKey = this.state.stateKey(msg.channelType, msg.chatId);
         const ctrl = this.activeControls.get(chatKey);
         if (ctrl) {
+          this.activeControls.delete(chatKey);
           await ctrl.interrupt();
           await adapter.send({ chatId: msg.chatId, text: '⏹ Interrupted current execution' });
         } else {

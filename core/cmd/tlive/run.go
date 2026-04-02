@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -145,7 +146,11 @@ func runHost(cfg *config.Config, args []string, rows, cols uint16, lockPath stri
 	fmt.Fprintf(os.Stderr, "    Local:   %s\n", localURL)
 	fmt.Fprintf(os.Stderr, "    Network: %s\n", url)
 	fmt.Fprintf(os.Stderr, "  Session: %s (ID: %s)\n\n", ms.Session.Command, ms.Session.ID)
-	qrterminal.GenerateHalfBlock(url, qrterminal.L, os.Stderr)
+	if runtime.GOOS == "windows" {
+		qrterminal.Generate(url, qrterminal.L, os.Stderr)
+	} else {
+		qrterminal.GenerateHalfBlock(url, qrterminal.L, os.Stderr)
+	}
 	fmt.Fprintln(os.Stderr)
 
 	// Set terminal to raw mode for proper input pass-through
@@ -266,7 +271,11 @@ func runClient(lock daemon.LockInfo, args []string, rows, cols uint16) error {
 	fmt.Fprintf(os.Stderr, "    Local:   %s\n", localURL)
 	fmt.Fprintf(os.Stderr, "    Network: %s\n", url)
 	fmt.Fprintf(os.Stderr, "  Session: %s (ID: %s)\n\n", args[0], sessionID)
-	qrterminal.GenerateHalfBlock(url, qrterminal.L, os.Stderr)
+	if runtime.GOOS == "windows" {
+		qrterminal.Generate(url, qrterminal.L, os.Stderr)
+	} else {
+		qrterminal.GenerateHalfBlock(url, qrterminal.L, os.Stderr)
+	}
 	fmt.Fprintln(os.Stderr)
 
 	// Set terminal to raw mode

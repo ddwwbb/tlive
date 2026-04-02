@@ -20,6 +20,7 @@ func TestLoadFromEnv_Missing(t *testing.T) {
 	// Point HOME to a temp dir that has no config.env
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
 
 	cfg, err := LoadFromEnv()
 	if err != nil {
@@ -33,6 +34,7 @@ func TestLoadFromEnv_Missing(t *testing.T) {
 func TestLoadFromEnv_Values(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
 
 	cfgDir := filepath.Join(dir, ".tlive")
 	if err := os.MkdirAll(cfgDir, 0755); err != nil {
@@ -61,6 +63,7 @@ func TestLoadFromEnv_Values(t *testing.T) {
 func TestLoadFromEnv_QuotedValues(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
 
 	cfgDir := filepath.Join(dir, ".tlive")
 	os.MkdirAll(cfgDir, 0755)
@@ -79,6 +82,7 @@ func TestLoadFromEnv_QuotedValues(t *testing.T) {
 func TestLoadFromEnv_Comments(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
 
 	cfgDir := filepath.Join(dir, ".tlive")
 	os.MkdirAll(cfgDir, 0755)

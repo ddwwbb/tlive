@@ -46,3 +46,17 @@ export function createUndiciAgent(proxyUrl: string): Dispatcher | undefined {
   }
   throw new Error(`Unsupported proxy protocol: ${protocol}. Use http:// or https://`);
 }
+
+/** Mask credentials in proxy URL for safe logging */
+export function maskProxyUrl(proxyUrl: string): string {
+  try {
+    const url = new URL(proxyUrl);
+    if (url.username || url.password) {
+      url.username = '****';
+      url.password = '****';
+    }
+    return url.toString();
+  } catch {
+    return '****';
+  }
+}

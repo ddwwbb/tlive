@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createNodeAgent, createUndiciAgent } from '../proxy.js';
+import { createNodeAgent, createUndiciAgent, maskProxyUrl } from '../proxy.js';
 
 describe('createNodeAgent (for grammy / node-fetch)', () => {
   it('returns undefined for empty string', () => {
@@ -53,5 +53,21 @@ describe('createUndiciAgent (for discord.js)', () => {
   it('returns undefined and warns for socks:// URL', () => {
     const agent = createUndiciAgent('socks5://127.0.0.1:1080');
     expect(agent).toBeUndefined();
+  });
+});
+
+describe('maskProxyUrl', () => {
+  it('masks credentials in URL', () => {
+    expect(maskProxyUrl('socks5://user:pass@host:1080')).not.toContain('user');
+    expect(maskProxyUrl('socks5://user:pass@host:1080')).not.toContain('pass');
+    expect(maskProxyUrl('socks5://user:pass@host:1080')).toContain('host:1080');
+  });
+
+  it('preserves URL without credentials', () => {
+    expect(maskProxyUrl('http://127.0.0.1:7890')).toBe('http://127.0.0.1:7890/');
+  });
+
+  it('handles invalid URL gracefully', () => {
+    expect(maskProxyUrl('not-a-url')).toBe('****');
   });
 });

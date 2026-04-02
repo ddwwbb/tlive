@@ -5,7 +5,7 @@ import { createServer, type Server } from 'node:http';
 import { BaseChannelAdapter, registerAdapterFactory } from './base.js';
 import type { InboundMessage, OutboundMessage, SendResult, FileAttachment } from './types.js';
 import { loadConfig } from '../config.js';
-import { createNodeAgent } from '../proxy.js';
+import { createNodeAgent, maskProxyUrl } from '../proxy.js';
 import { chunkMarkdown } from '../delivery/delivery.js';
 import { classifyError } from './errors.js';
 
@@ -59,7 +59,7 @@ export class TelegramAdapter extends BaseChannelAdapter {
       : {});
 
     if (this.config.proxy) {
-      console.log(`[telegram] Using proxy: ${this.config.proxy}`);
+      console.log(`[telegram] Using proxy: ${maskProxyUrl(this.config.proxy)}`);
     }
 
     // Install API throttler (rate-limit protection)

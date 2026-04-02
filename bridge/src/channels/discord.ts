@@ -15,7 +15,7 @@ import type { InboundMessage, OutboundMessage, SendResult, FileAttachment } from
 import { loadConfig } from '../config.js';
 import { chunkMarkdown } from '../delivery/delivery.js';
 import { classifyError } from './errors.js';
-import { createUndiciAgent } from '../proxy.js';
+import { createUndiciAgent, maskProxyUrl } from '../proxy.js';
 
 interface DiscordConfig {
   botToken: string;
@@ -48,7 +48,7 @@ export class DiscordAdapter extends BaseChannelAdapter {
     });
 
     if (this.config.proxy) {
-      console.log(`[discord] Using proxy: ${this.config.proxy}`);
+      console.log(`[discord] Using proxy: ${maskProxyUrl(this.config.proxy)}`);
     }
 
     this.client.on('messageCreate', async (msg) => {

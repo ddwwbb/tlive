@@ -20,6 +20,8 @@ export interface Config {
   coreUrl: string;
   /** Claude Code settings sources to load (default: ['user']) */
   claudeSettingSources: ClaudeSettingSource[];
+  /** Global proxy URL (e.g., http://127.0.0.1:7890, socks5://127.0.0.1:1080) */
+  proxy: string;
   telegram: {
     botToken: string;
     chatId: string;
@@ -34,13 +36,15 @@ export interface Config {
     webhookPort: number;
     /** Disable link previews in outbound messages (default: true) */
     disableLinkPreview: boolean;
-    /** HTTP/SOCKS proxy URL for api.telegram.org (e.g., socks5://127.0.0.1:1080) */
+    /** HTTP/SOCKS proxy URL — overrides global TL_PROXY */
     proxy: string;
   };
   discord: {
     botToken: string;
     allowedUsers: string[];
     allowedChannels: string[];
+    /** HTTP/HTTPS proxy URL — overrides global TL_PROXY (SOCKS not supported) */
+    proxy: string;
   };
   feishu: {
     appId: string;
@@ -103,6 +107,7 @@ export function loadConfig(): Config {
     process.env[key] ?? envFile[key] ?? defaultValue;
 
   const port = parseInt(get('TL_PORT', '8080'), 10);
+  const globalProxy = get('TL_PROXY');
 
   const config: Config = {
     port,
@@ -111,6 +116,7 @@ export function loadConfig(): Config {
     enabledChannels: parseList(get('TL_ENABLED_CHANNELS')),
     runtime: (get('TL_RUNTIME', 'claude') as Config['runtime']),
     claudeSettingSources: parseList(get('TL_CLAUDE_SETTINGS', 'user')) as ClaudeSettingSource[],
+    proxy: globalProxy,
     defaultWorkdir: get('TL_DEFAULT_WORKDIR', process.cwd()),
     defaultModel: get('TL_DEFAULT_MODEL'),
     coreUrl: get('TL_CORE_URL', `http://localhost:${port}`),
@@ -123,12 +129,13 @@ export function loadConfig(): Config {
       webhookSecret: get('TL_TG_WEBHOOK_SECRET'),
       webhookPort: parseInt(get('TL_TG_WEBHOOK_PORT', '8443'), 10),
       disableLinkPreview: get('TL_TG_DISABLE_LINK_PREVIEW', 'true') !== 'false',
-      proxy: get('TL_TG_PROXY'),
+      proxy: get('TL_TG_PROXY') || globalProxy,
     },
     discord: {
       botToken: get('TL_DC_BOT_TOKEN'),
       allowedUsers: parseList(get('TL_DC_ALLOWED_USERS')),
       allowedChannels: parseList(get('TL_DC_ALLOWED_CHANNELS')),
+      proxy: get('TL_DC_PROXY') || globalProxy,
     },
     feishu: {
       appId: get('TL_FS_APP_ID'),

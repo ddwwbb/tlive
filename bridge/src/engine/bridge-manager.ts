@@ -553,10 +553,32 @@ export class BridgeManager {
         if (askqIdx >= 0) {
           const permId = parts.slice(2, askqIdx).join(':');
           const optionIndex = parseInt(parts[askqIdx + 1], 10);
+          const qData = this.sdkQuestionData.get(permId);
+          const selected = qData?.questions?.[0]?.options?.[optionIndex];
           this.sdkQuestionAnswers.set(permId, optionIndex);
           this.permissions.getGateway().resolve(permId, 'allow');
+          if (selected) {
+            adapter.editMessage(msg.chatId, msg.messageId, {
+              chatId: msg.chatId,
+              text: `✅ Selected: ${selected.label}`,
+              feishuHeader: { template: 'green', title: `✅ ${selected.label}` },
+            }).catch(() => {});
+          }
           return true;
         }
+      }
+
+      // SDK AskUserQuestion skip (perm:deny:askq-*) — resolve + edit card
+      if (msg.callbackData.startsWith('perm:deny:askq-')) {
+        const permId = msg.callbackData.split(':').slice(2).join(':');
+        this.permissions.getGateway().resolve(permId, 'deny');
+        this.sdkQuestionData.delete(permId);
+        adapter.editMessage(msg.chatId, msg.messageId, {
+          chatId: msg.chatId,
+          text: '❌ Skipped',
+          feishuHeader: { template: 'red', title: '❌ Skipped' },
+        }).catch(() => {});
+        return true;
       }
 
       // Regular permission broker callbacks (perm:allow:ID, perm:deny:ID)

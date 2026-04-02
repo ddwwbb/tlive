@@ -26,7 +26,9 @@
     "@larksuiteoapi/node-sdk": "^1.59.0",
     "discord.js": "^14.25.1",
     "grammy": "^1.41.1",
+    "https-proxy-agent": "^9.0.0",
     "markdown-it": "^14.1.1",
+    "socks-proxy-agent": "^10.0.0",
     "zod": "^4.3.6"
   },
   "optionalDependencies": {

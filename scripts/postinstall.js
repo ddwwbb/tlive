@@ -76,6 +76,13 @@ function copyReferenceDocs() {
       copyFileSync(src, dest);
     }
   }
+  // Copy config template so the skill can reference exact variable names
+  const configExample = join(__dirname, '..', 'config.env.example');
+  const configDest = join(docsDir, 'config.env.example');
+  if (existsSync(configExample)) {
+    copyFileSync(configExample, configDest);
+  }
+
   console.log(`Reference docs installed to ${docsDir}`);
 }
 

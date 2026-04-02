@@ -94,13 +94,14 @@ Enter numbers (e.g., 1,3):"
 - Auto-generate TL_TOKEN (32-char hex)
 
 **Step 4 — Write config and validate:**
-1. Show a summary table (secrets masked to last 4 chars)
-2. Ask user to confirm before writing
-3. `mkdir -p ~/.tlive/{data,logs,runtime}`
-4. Write `~/.tlive/config.env`, then `chmod 600`
-5. Validate tokens — read `~/.tlive/docs/token-validation.md` for exact commands per platform
-6. Report results. If validation fails, explain what's wrong.
-7. On success: "Setup complete! I'll start the Bridge now." Then auto-start.
+1. Read `~/.tlive/docs/config.env.example` as the template — use its exact variable names (e.g., `TL_TG_*` for Telegram, `TL_DC_*` for Discord, `TL_FS_*` for Feishu). Do NOT invent variable names.
+2. Show a summary table (secrets masked to last 4 chars)
+3. Ask user to confirm before writing
+4. `mkdir -p ~/.tlive/{data,logs,runtime}`
+5. Write `~/.tlive/config.env` using the template's variable names, then `chmod 600`
+6. Validate tokens — read `~/.tlive/docs/token-validation.md` for exact commands per platform
+7. Report results. If validation fails, explain what's wrong.
+8. On success: "Setup complete! I'll start the Bridge now." Then auto-start.
 
 ### `reconfigure`
 

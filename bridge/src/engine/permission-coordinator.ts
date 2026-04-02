@@ -340,6 +340,59 @@ export class PermissionCoordinator {
     return true;
   }
 
+  /** Handle AskUserQuestion free text reply — resolve hook with text as answer */
+  async resolveAskQuestionWithText(
+    hookId: string,
+    text: string,
+    sessionId: string,
+    messageId: string,
+    adapter: { editMessage: (chatId: string, messageId: string, msg: any) => Promise<any>; send: (msg: any) => Promise<any> },
+    chatId: string,
+    coreAvailable: boolean,
+  ): Promise<boolean> {
+    if (this.resolvedHookIds.has(hookId)) return true;
+
+    if (!coreAvailable) {
+      await adapter.send({ chatId, text: '❌ Go Core not available' });
+      return true;
+    }
+    const questionData = this.hookQuestionData.get(hookId);
+    if (!questionData) {
+      await adapter.send({ chatId, text: '❌ Question data not found' });
+      return true;
+    }
+
+    this.resolvedHookIds.set(hookId, Date.now());
+    const q = questionData.questions[0];
+    const answers: Record<string, string> = { [q.question]: text };
+    const updatedInput = { questions: questionData.questions, answers };
+
+    try {
+      await fetch(`${this.coreUrl}/api/hooks/permission/${hookId}/resolve`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ decision: 'allow', updated_input: updatedInput }),
+        signal: AbortSignal.timeout(5000),
+      });
+      this.hookQuestionData.delete(hookId);
+      const preview = text.length > 50 ? text.slice(0, 47) + '...' : text;
+      await adapter.editMessage(chatId, messageId, {
+        chatId,
+        text: `✅ Answer: ${preview}`,
+        feishuHeader: { template: 'green', title: '✅ Answered' },
+      });
+      if (sessionId) {
+        this.trackHookMessage(messageId, sessionId);
+      }
+    } catch (err) {
+      await adapter.send({ chatId, text: `❌ Failed to resolve: ${err}` });
+    }
+    return true;
+  }
+
   // --- Dynamic session whitelist ---
 
   /** Check if a tool is allowed by the dynamic session whitelist */

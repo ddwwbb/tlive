@@ -292,9 +292,9 @@ async function main() {
 
               try {
                 const hints: Record<string, string> = {
-                  feishu: '\n\n💬 或回复数字选择 (如 **1**)',
-                  telegram: '\n\n💬 Or reply with number (e.g. <b>1</b>)',
-                  discord: '\n\n💬 Or reply with number (e.g. `1`)',
+                  feishu: '\n\n💬 回复数字选择，或直接输入内容',
+                  telegram: '\n\n💬 回复数字选择，或直接输入内容',
+                  discord: '\n\n💬 Reply with number to select, or type your answer',
                 };
                 const hint = hints[adapter.channelType] || '';
                 const outMsg: import('./channels/types.js').OutboundMessage = {

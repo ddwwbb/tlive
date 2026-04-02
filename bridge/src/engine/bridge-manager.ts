@@ -85,6 +85,7 @@ export class BridgeManager {
   /** SDK AskUserQuestion: store question data and selected option index */
   private sdkQuestionData = new Map<string, { questions: Array<{ question: string; header: string; options: Array<{ label: string; description?: string }>; multiSelect: boolean }> }>();
   private sdkQuestionAnswers = new Map<string, number>();
+  private sdkQuestionTextAnswers = new Map<string, string>();
 
   constructor() {
     const config = loadConfig();
@@ -395,32 +396,44 @@ export class BridgeManager {
       }
     }
 
-    // Numeric text reply to pending AskUserQuestion (e.g. "1", "2", "3")
+    // Text reply to pending AskUserQuestion — numeric (select option) or free text (direct input)
     if (msg.text) {
       const trimmed = msg.text.trim();
-      const numMatch = trimmed.match(/^(\d+)$/);
-      if (numMatch) {
-        const optionIndex = parseInt(numMatch[1], 10) - 1; // 1-based to 0-based
-        if (optionIndex >= 0) {
-          // Hook mode: resolve via permission coordinator
-          const pendingQuestion = this.permissions.getLatestPendingQuestion(adapter.channelType);
-          if (pendingQuestion) {
-            await this.permissions.resolveAskQuestion(
-              pendingQuestion.hookId,
-              optionIndex,
-              pendingQuestion.sessionId,
-              pendingQuestion.messageId,
-              adapter,
-              msg.chatId,
-              this.coreAvailable,
+      // Check for any pending AskUserQuestion (hook or SDK mode)
+      const pendingHookQ = this.permissions.getLatestPendingQuestion(adapter.channelType);
+      const pendingSdkQ = this.findPendingSdkQuestion(adapter.channelType, msg.chatId);
+
+      if (pendingHookQ || pendingSdkQ) {
+        const numMatch = trimmed.match(/^(\d+)$/);
+        if (numMatch) {
+          // Numeric reply — select option by index
+          const optionIndex = parseInt(numMatch[1], 10) - 1;
+          if (optionIndex >= 0) {
+            if (pendingHookQ) {
+              await this.permissions.resolveAskQuestion(
+                pendingHookQ.hookId, optionIndex, pendingHookQ.sessionId,
+                pendingHookQ.messageId, adapter, msg.chatId, this.coreAvailable,
+              );
+              return true;
+            }
+            if (pendingSdkQ) {
+              this.sdkQuestionAnswers.set(pendingSdkQ.permId, optionIndex);
+              this.permissions.getGateway().resolve(pendingSdkQ.permId, 'allow');
+              return true;
+            }
+          }
+        } else {
+          // Free text reply — use text as direct answer
+          if (pendingHookQ) {
+            await this.permissions.resolveAskQuestionWithText(
+              pendingHookQ.hookId, trimmed, pendingHookQ.sessionId,
+              pendingHookQ.messageId, adapter, msg.chatId, this.coreAvailable,
             );
             return true;
           }
-          // SDK mode: resolve via gateway (find pending SDK askq permission)
-          const sdkQuestion = this.findPendingSdkQuestion(adapter.channelType, msg.chatId);
-          if (sdkQuestion) {
-            this.sdkQuestionAnswers.set(sdkQuestion.permId, optionIndex);
-            this.permissions.getGateway().resolve(sdkQuestion.permId, 'allow');
+          if (pendingSdkQ) {
+            this.sdkQuestionTextAnswers.set(pendingSdkQ.permId, trimmed);
+            this.permissions.getGateway().resolve(pendingSdkQ.permId, 'allow');
             return true;
           }
         }
@@ -792,10 +805,10 @@ export class BridgeManager {
 
       // Send question card via adapter
       const hint = msg.channelType === 'telegram'
-        ? '\n\n💬 Or reply with number (e.g. <b>1</b>)'
+        ? '\n\n💬 回复数字选择，或直接输入内容'
         : msg.channelType === 'feishu'
-          ? '\n\n💬 或回复数字选择 (如 **1**)'
-          : '\n\n💬 Or reply with number (e.g. `1`)';
+          ? '\n\n💬 回复数字选择，或直接输入内容'
+          : '\n\n💬 Reply with number to select, or type your answer';
 
       const outMsg: import('../channels/types.js').OutboundMessage = {
         chatId: msg.chatId,
@@ -827,13 +840,26 @@ export class BridgeManager {
         throw new Error('User skipped the question');
       }
 
-      // Retrieve selected option index (stored by callback handler)
+      // Check for free text answer first, then option index
+      const textAnswer = this.sdkQuestionTextAnswers.get(permId);
+      this.sdkQuestionTextAnswers.delete(permId);
+      this.sdkQuestionData.delete(permId);
+
+      if (textAnswer !== undefined) {
+        // Free text reply
+        adapter.editMessage(msg.chatId, sendResult.messageId, {
+          chatId: msg.chatId,
+          text: `✅ Answer: ${textAnswer.length > 50 ? textAnswer.slice(0, 47) + '...' : textAnswer}`,
+          feishuHeader: msg.channelType === 'feishu' ? { template: 'green', title: '✅ Answered' } : undefined,
+        }).catch(() => {});
+        return { [q.question]: textAnswer };
+      }
+
+      // Option index reply
       const optionIndex = this.sdkQuestionAnswers.get(permId) ?? 0;
       this.sdkQuestionAnswers.delete(permId);
       const selected = q.options[optionIndex];
-      this.sdkQuestionData.delete(permId);
 
-      // Edit the message to show selection
       adapter.editMessage(msg.chatId, sendResult.messageId, {
         chatId: msg.chatId,
         text: `✅ Selected: ${selected?.label ?? '?'}`,

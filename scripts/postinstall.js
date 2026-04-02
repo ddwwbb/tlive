@@ -65,13 +65,15 @@ function download(url, dest) {
 function copyHookScripts() {
   mkdirSync(BIN_DIR, { recursive: true });
 
-  const scripts = ['hook-handler.sh', 'notify-handler.sh', 'stop-handler.sh'];
+  const scripts = ['hook-handler.mjs', 'notify-handler.mjs', 'stop-handler.mjs', 'statusline.mjs'];
   for (const script of scripts) {
     const src = join(__dirname, script);
     const dest = join(BIN_DIR, script);
     if (existsSync(src)) {
       copyFileSync(src, dest);
-      chmodSync(dest, 0o755);
+      if (platform() !== 'win32') {
+        try { chmodSync(dest, 0o755); } catch {}
+      }
     }
   }
   console.log(`Hook scripts installed to ${BIN_DIR}`);
@@ -154,7 +156,6 @@ async function downloadGoBinary() {
 
 async function main() {
   console.log('Setting up TLive...');
-  copyHookScripts();
   copyReferenceDocs();
   await downloadGoBinary();
   console.log('\nTLive setup complete.');

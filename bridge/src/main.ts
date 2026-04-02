@@ -25,7 +25,7 @@ function formatPermissionCard(toolName: string, input: unknown): string {
       break;
     }
     case 'Edit': {
-      const file = String(data.file_path || '').replace(/^\/home\/[^/]+\//, '~/');
+      const file = String(data.file_path || '').replace(homedir(), '~').replace(/\\/g, '/');
       const oldStr = String(data.old_string || '');
       const newStr = String(data.new_string || '');
       const diffLines: string[] = [];
@@ -36,19 +36,19 @@ function formatPermissionCard(toolName: string, input: unknown): string {
       break;
     }
     case 'Write': {
-      const file = String(data.file_path || '').replace(/^\/home\/[^/]+\//, '~/');
+      const file = String(data.file_path || '').replace(homedir(), '~').replace(/\\/g, '/');
       const content = String(data.content || '');
       const preview = content.length > 200 ? content.slice(0, 197) + '...' : content;
       parts.push(`\n📄 Write: \`${file}\` (${content.length} chars)\n\`\`\`\n${preview}\n\`\`\``);
       break;
     }
     case 'Read': {
-      const file = String(data.file_path || '').replace(/^\/home\/[^/]+\//, '~/');
+      const file = String(data.file_path || '').replace(homedir(), '~').replace(/\\/g, '/');
       parts.push(`\n📖 Read: \`${file}\``);
       break;
     }
     case 'NotebookEdit': {
-      const file = String(data.file_path || '').replace(/^\/home\/[^/]+\//, '~/');
+      const file = String(data.file_path || '').replace(homedir(), '~').replace(/\\/g, '/');
       parts.push(`\n📓 NotebookEdit: \`${file}\``);
       break;
     }

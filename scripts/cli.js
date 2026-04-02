@@ -3,7 +3,7 @@
 import { execSync, spawn, spawnSync } from 'node:child_process';
 import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { existsSync, writeFileSync, readFileSync, unlinkSync, mkdirSync, chmodSync, openSync, copyFileSync } from 'node:fs';
+import { existsSync, writeFileSync, readFileSync, unlinkSync, mkdirSync, chmodSync, openSync, closeSync, copyFileSync, statSync, readSync } from 'node:fs';
 import { homedir } from 'node:os';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -38,10 +38,11 @@ function loadConfigEnv() {
   for (const line of content.split('\n')) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('#')) continue;
-    const eq = trimmed.indexOf('=');
+    const raw = trimmed.startsWith('export ') ? trimmed.slice(7) : trimmed;
+    const eq = raw.indexOf('=');
     if (eq === -1) continue;
-    const key = trimmed.slice(0, eq).trim();
-    let val = trimmed.slice(eq + 1).trim();
+    const key = raw.slice(0, eq).trim();
+    let val = raw.slice(eq + 1).trim();
     // Strip surrounding quotes
     if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
       val = val.slice(1, -1);
@@ -53,7 +54,11 @@ function loadConfigEnv() {
 
 /** Check whether a PID is alive */
 function isProcessRunning(pid) {
-  try { process.kill(pid, 0); return true; } catch { return false; }
+  try { process.kill(pid, 0); return true; } catch (e) {
+    // EPERM = process exists but no permission (treat as running)
+    if (e.code === 'EPERM') return true;
+    return false;
+  }
 }
 
 /** Read bridge.pid and return PID if alive, else null */
@@ -108,12 +113,14 @@ function daemonStart() {
 
   const child = spawn(process.execPath, [BRIDGE_ENTRY], {
     detached: true,
+    windowsHide: true,
     stdio: ['ignore', logFd, logFd],
     env,
   });
 
   writeFileSync(BRIDGE_PID, String(child.pid));
   child.unref();
+  closeSync(logFd);
 
   console.log(`Bridge started (PID ${child.pid})`);
 }
@@ -146,8 +153,8 @@ async function daemonStatus() {
   }
 
   // Check Go Core web terminal
-  const port = config.TL_PORT || process.env.TL_PORT || '8080';
-  const token = config.TL_TOKEN || process.env.TL_TOKEN || '';
+  const port = process.env.TL_PORT || config.TL_PORT || '8080';
+  const token = process.env.TL_TOKEN || config.TL_TOKEN || '';
   try {
     const resp = await fetch(`http://localhost:${port}/api/status`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -171,11 +178,24 @@ function daemonLogs(n = 50) {
     return;
   }
   try {
-    const content = readFileSync(logFile, 'utf-8');
-    const lines = content.split('\n');
-    // Last n lines (filter trailing empty)
-    const tail = lines.slice(-n - 1).filter((l, i, a) => i < a.length - 1 || l.length > 0);
-    console.log(tail.join('\n'));
+    const size = statSync(logFile).size;
+    // Read at most last 128KB to avoid OOM on huge logs
+    const MAX_READ = 128 * 1024;
+    let content;
+    if (size > MAX_READ) {
+      const fd = openSync(logFile, 'r');
+      const buf = Buffer.alloc(MAX_READ);
+      readSync(fd, buf, 0, MAX_READ, size - MAX_READ);
+      closeSync(fd);
+      content = buf.toString('utf-8');
+      // Drop first partial line
+      const firstNewline = content.indexOf('\n');
+      if (firstNewline !== -1) content = content.slice(firstNewline + 1);
+    } else {
+      content = readFileSync(logFile, 'utf-8');
+    }
+    const lines = content.trimEnd().split('\n').slice(-n);
+    console.log(lines.join('\n'));
   } catch {
     console.log('(no log file)');
   }
@@ -208,13 +228,17 @@ function ensureBridgeRunning() {
   try {
     const child = spawn(process.execPath, [BRIDGE_ENTRY], {
       detached: true,
+      windowsHide: true,
       stdio: ['ignore', logFd, logFd],
       env,
     });
     writeFileSync(BRIDGE_PID, String(child.pid));
     child.unref();
+    closeSync(logFd);
     console.log('  Bridge auto-started in background');
-  } catch {}
+  } catch (e) {
+    console.error(`  Bridge auto-start failed: ${e.message || e}`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -243,8 +267,8 @@ async function runDoctor() {
     } catch { return null; }
   })();
 
-  console.log(checkCmd('curl') ? '  curl:    OK' : '  curl:    NOT FOUND');
-  console.log(checkCmd('jq') ? '  jq:      OK' : '  jq:      NOT FOUND (needed for statusline)');
+  console.log(checkCmd('curl') ? '  curl:    OK' : '  curl:    NOT FOUND (optional)');
+  console.log(checkCmd('jq') ? '  jq:      OK' : '  jq:      NOT FOUND (optional)');
   console.log(gitVersion ? `  git:     ${gitVersion}` : '  git:     NOT FOUND');
 
   console.log('');
@@ -283,8 +307,8 @@ async function runDoctor() {
 
   // API check
   const config = existsSync(CONFIG_FILE) ? loadConfigEnv() : {};
-  const port = config.TL_PORT || process.env.TL_PORT || '8080';
-  const token = config.TL_TOKEN || process.env.TL_TOKEN || '';
+  const port = process.env.TL_PORT || config.TL_PORT || '8080';
+  const token = process.env.TL_TOKEN || config.TL_TOKEN || '';
   try {
     const resp = await fetch(`http://localhost:${port}/api/status`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -303,11 +327,10 @@ async function runDoctor() {
 
   console.log('');
 
-  // Hook scripts
+  // Hook scripts (in npm package directory)
   console.log('Hooks:');
-  const binDir = join(TLIVE_HOME, 'bin');
   for (const name of ['hook-handler.mjs', 'notify-handler.mjs', 'stop-handler.mjs']) {
-    const p = join(binDir, name);
+    const p = join(SCRIPTS_DIR, name);
     console.log(existsSync(p) ? `  ${name}: OK` : `  ${name}: NOT FOUND`);
   }
 
@@ -415,7 +438,8 @@ switch (command) {
   case 'setup': {
     const setupEntry = join(PACKAGE_ROOT, 'bridge', 'dist', 'setup.mjs');
     if (existsSync(setupEntry)) {
-      run(`node ${setupEntry}`);
+      const r = spawnSync(process.execPath, [setupEntry], { stdio: 'inherit' });
+      if (r.status) process.exit(r.status);
     } else {
       console.error('Setup wizard not found. Try reinstalling: npm install -g tlive');
     }
@@ -524,9 +548,6 @@ switch (command) {
     if (sub === 'skills') {
       const target = args.includes('--codex') ? 'codex' : 'claude';
       const skillSrc = join(PACKAGE_ROOT, 'SKILL.md');
-      const hookSrc = join(SCRIPTS_DIR, 'hook-handler.mjs');
-      const notifySrc = join(SCRIPTS_DIR, 'notify-handler.mjs');
-      const stopSrc = join(SCRIPTS_DIR, 'stop-handler.mjs');
 
       if (!existsSync(skillSrc)) {
         console.error('SKILL.md not found. Try reinstalling: npm install -g tlive');
@@ -544,18 +565,6 @@ switch (command) {
         : join(skillDir, 'tlive.md');
       copyFileSync(skillSrc, skillDest);
       console.log(`Skill installed: ${skillDest}`);
-
-      // Install hook scripts (.mjs)
-      const binDir = join(TLIVE_HOME, 'bin');
-      mkdirSync(binDir, { recursive: true });
-      for (const src of [hookSrc, notifySrc, stopSrc]) {
-        if (existsSync(src)) {
-          const dest = join(binDir, basename(src));
-          copyFileSync(src, dest);
-          if (!isWindows) chmodSync(dest, 0o755);
-        }
-      }
-      console.log(`Hook scripts installed: ${binDir}`);
 
       // Sync reference docs to ~/.tlive/docs/
       const docsDir = join(TLIVE_HOME, 'docs');
@@ -580,105 +589,59 @@ switch (command) {
 
         if (!settings.hooks) settings.hooks = {};
 
-        const hookHandlerCmd = `node ${join(binDir, 'hook-handler.mjs')}`;
-        const notifyHandlerCmd = `node ${join(binDir, 'notify-handler.mjs')}`;
-        const stopHandlerCmd = `node ${join(binDir, 'stop-handler.mjs')}`;
+        // Point hooks directly to npm package scripts — no copy needed
+        const hookHandlerCmd = `node "${join(SCRIPTS_DIR, 'hook-handler.mjs')}"`;
+        const notifyHandlerCmd = `node "${join(SCRIPTS_DIR, 'notify-handler.mjs')}"`;
+        const stopHandlerCmd = `node "${join(SCRIPTS_DIR, 'stop-handler.mjs')}"`;
 
-        // Check if TLive hooks already configured (match both legacy .sh and new .mjs)
-        const hasHook = (type) => {
-          const entries = settings.hooks[type] || [];
-          return entries.some(e => {
-            const matchCmd = (cmd) =>
-              cmd?.includes('hook-handler.sh') || cmd?.includes('hook-handler.mjs') ||
-              cmd?.includes('notify-handler.sh') || cmd?.includes('notify-handler.mjs') ||
-              cmd?.includes('stop-handler.sh') || cmd?.includes('stop-handler.mjs');
-            if (matchCmd(e.command)) return true;
-            if (e.hooks) return e.hooks.some(h => matchCmd(h.command));
-            return false;
-          });
-        };
 
-        let hooksAdded = false;
+        // Remove ALL existing TLive hooks (both .sh and .mjs, any path)
+        // then re-add with current paths — ensures hooks always point to this install
+        const isTliveHook = (cmd) =>
+          cmd?.includes('hook-handler') || cmd?.includes('notify-handler') || cmd?.includes('stop-handler');
 
-        // Clean up ALL legacy .sh hooks from every hook type
         for (const hookType of Object.keys(settings.hooks)) {
-          const before = (settings.hooks[hookType] || []).length;
           settings.hooks[hookType] = (settings.hooks[hookType] || []).filter(e => {
-            const isLegacySh = (cmd) =>
-              cmd?.includes('hook-handler.sh') || cmd?.includes('notify-handler.sh') || cmd?.includes('stop-handler.sh');
-            if (isLegacySh(e.command)) return false;
+            if (isTliveHook(e.command)) return false;
             if (e.hooks) {
-              e.hooks = e.hooks.filter(h => !isLegacySh(h.command));
+              e.hooks = e.hooks.filter(h => !isTliveHook(h.command));
               return e.hooks.length > 0;
             }
             return true;
           });
           if (settings.hooks[hookType].length === 0) delete settings.hooks[hookType];
-          if ((settings.hooks[hookType] || []).length !== before) hooksAdded = true; // force write
         }
 
-        // Clean up legacy PreToolUse hook if present (replaced by PermissionRequest)
-        if (settings.hooks.PreToolUse) {
-          settings.hooks.PreToolUse = settings.hooks.PreToolUse.filter(e => {
-            const matchTlive = (cmd) => cmd?.includes('hook-handler');
-            if (matchTlive(e.command)) return false;
-            if (e.hooks) return !e.hooks.some(h => matchTlive(h.command));
-            return true;
-          });
-          if (settings.hooks.PreToolUse.length === 0) delete settings.hooks.PreToolUse;
-          hooksAdded = true;
-        }
-
-        // PermissionRequest: forward Claude Code permission dialogs to IM
-        if (!hasHook('PermissionRequest')) {
-          if (!settings.hooks.PermissionRequest) settings.hooks.PermissionRequest = [];
-          settings.hooks.PermissionRequest.push({
-            hooks: [{
-              type: 'command',
-              command: hookHandlerCmd,
-              timeout: 300000,
-            }],
-          });
-          hooksAdded = true;
-        }
-
-        if (!hasHook('Notification')) {
-          if (!settings.hooks.Notification) settings.hooks.Notification = [];
-          settings.hooks.Notification.push({
-            hooks: [{
-              type: 'command',
-              command: notifyHandlerCmd,
-              timeout: 5000,
-            }],
-          });
-          hooksAdded = true;
-        }
-
-        const hasStopHook = (settings.hooks.Stop || []).some(e => {
-          const matchStop = (cmd) => cmd?.includes('stop-handler.sh') || cmd?.includes('stop-handler.mjs');
-          if (matchStop(e.command)) return true;
-          if (e.hooks) return e.hooks.some(h => matchStop(h.command));
-          return false;
+        // Add hooks with current paths
+        if (!settings.hooks.PermissionRequest) settings.hooks.PermissionRequest = [];
+        settings.hooks.PermissionRequest.push({
+          hooks: [{
+            type: 'command',
+            command: hookHandlerCmd,
+            timeout: 300000,
+          }],
         });
 
-        if (!hasStopHook) {
-          if (!settings.hooks.Stop) settings.hooks.Stop = [];
-          settings.hooks.Stop.push({
-            hooks: [{
-              type: 'command',
-              command: stopHandlerCmd,
-              async: true,
-            }],
-          });
-          hooksAdded = true;
-        }
+        if (!settings.hooks.Notification) settings.hooks.Notification = [];
+        settings.hooks.Notification.push({
+          hooks: [{
+            type: 'command',
+            command: notifyHandlerCmd,
+            timeout: 5000,
+          }],
+        });
 
-        if (hooksAdded) {
-          writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
-          console.log(`Hooks configured in: ${settingsPath}`);
-        } else {
-          console.log('Hooks already configured in settings.json');
-        }
+        if (!settings.hooks.Stop) settings.hooks.Stop = [];
+        settings.hooks.Stop.push({
+          hooks: [{
+            type: 'command',
+            command: stopHandlerCmd,
+            async: true,
+          }],
+        });
+
+        writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
+        console.log(`Hooks configured in: ${settingsPath}`);
       }
     } else {
       console.log('Usage: tlive install skills [--codex]');

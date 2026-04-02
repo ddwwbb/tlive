@@ -316,10 +316,11 @@ tlive/
 │       ├── delivery/       # Chunking, retry, rate limiting
 │       └── markdown/       # Per-platform rendering
 ├── scripts/
-│   ├── hook-handler.sh     # PreToolUse hook → Go Core
-│   ├── notify-handler.sh   # Notification hook → Go Core
-│   ├── daemon.sh           # Bridge process management
-│   └── statusline.sh       # Claude Code status line
+│   ├── cli.js              # CLI entry point + daemon management
+│   ├── hook-handler.mjs    # PermissionRequest hook → Go Core
+│   ├── notify-handler.mjs  # Notification hook → Go Core
+│   ├── stop-handler.mjs    # Stop hook → Go Core
+│   └── statusline.mjs      # Claude Code status line
 ├── package.json            # npm: tlive
 └── docker-compose.yml
 ```

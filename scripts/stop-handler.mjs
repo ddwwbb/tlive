@@ -16,7 +16,10 @@ const pauseFile = join(homedir(), '.tlive', 'hooks-paused');
 if (existsSync(pauseFile)) process.exit(0);
 
 // Parse and inject session info
-let hookJson = JSON.parse(input);
+let hookJson;
+try {
+  hookJson = JSON.parse(input);
+} catch { process.exit(0); }
 hookJson.tlive_session_id = sessionId;
 hookJson.tlive_hook_type = 'stop';
 hookJson.tlive_cwd = process.cwd();
@@ -29,7 +32,7 @@ if (existsSync(configPath)) {
   try {
     const lines = readFileSync(configPath, 'utf-8').split('\n');
     for (const line of lines) {
-      const match = line.match(/^(\w+)=["']?(.*?)["']?\s*$/);
+      const match = line.match(/^(?:export\s+)?(\w+)=["']?(.*?)["']?\s*$/);
       if (match) {
         if (match[1] === 'TL_PORT') port = match[2];
         if (match[1] === 'TL_TOKEN') token = match[2];

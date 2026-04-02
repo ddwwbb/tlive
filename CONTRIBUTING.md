@@ -34,7 +34,7 @@ npm run build
 |-------------|--------------------------------------------|
 | `core/`     | Go core — main application binary          |
 | `bridge/`   | Node.js bridge — TypeScript, built with npm |
-| `scripts/`  | Utility scripts (bash + node)              |
+| `scripts/`  | CLI entry point + hook scripts (Node.js)   |
 | `.github/`  | CI workflows (GitHub Actions)              |
 
 ## Running Tests

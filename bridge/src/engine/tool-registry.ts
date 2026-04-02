@@ -1,3 +1,5 @@
+import { basename } from 'node:path';
+
 const TOOL_ICONS: Record<string, string> = {
   Read: '📖', Edit: '✏️', Write: '📝',
   Bash: '🖥️', Grep: '🔍', Glob: '📂',
@@ -22,7 +24,7 @@ export function getToolTitle(name: string, input: Record<string, unknown>): stri
     case 'Read':
     case 'Edit':
     case 'Write': {
-      const file = str(input.file_path).split('/').pop();
+      const file = basename(str(input.file_path));
       return file ? `${name}(${file})` : name;
     }
     case 'Grep': {

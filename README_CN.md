@@ -289,10 +289,11 @@ tlive/
 │       ├── delivery/       # 分块、重试、限速
 │       └── markdown/       # 各平台渲染
 ├── scripts/
-│   ├── hook-handler.sh     # PreToolUse hook → Go Core
-│   ├── notify-handler.sh   # Notification hook → Go Core
-│   ├── daemon.sh           # Bridge 进程管理
-│   └── statusline.sh       # Claude Code 状态行
+│   ├── cli.js              # CLI 入口 + 进程管理
+│   ├── hook-handler.mjs    # PermissionRequest hook → Go Core
+│   ├── notify-handler.mjs  # Notification hook → Go Core
+│   ├── stop-handler.mjs    # Stop hook → Go Core
+│   └── statusline.mjs      # Claude Code 状态行
 ├── package.json            # npm: tlive
 └── docker-compose.yml
 ```

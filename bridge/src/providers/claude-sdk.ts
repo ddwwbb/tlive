@@ -47,9 +47,12 @@ function findClaudeCli(): string | undefined {
   const fromEnv = process.env.CTI_CLAUDE_CODE_EXECUTABLE;
   if (fromEnv) return fromEnv;
 
-  // Try `which claude`
+  // Try `which claude` (or `where claude` on Windows)
+  const cmd = process.platform === 'win32' ? 'where claude' : 'which claude';
   try {
-    return execSync('which claude', { encoding: 'utf-8', timeout: 5000 }).trim() || undefined;
+    const result = execSync(cmd, { encoding: 'utf-8', timeout: 5000 }).trim();
+    // `where` on Windows may return multiple lines; take the first
+    return result.split('\n')[0]?.trim() || undefined;
   } catch {
     return undefined;
   }

@@ -19,7 +19,7 @@ import { CommandRouter } from './command-router.js';
 import type { FeishuStreamingSession } from '../channels/feishu-streaming.js';
 import { CostTracker } from './cost-tracker.js';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, basename } from 'node:path';
 import { homedir, networkInterfaces } from 'node:os';
 
 /** Bridge commands handled synchronously (don't block adapter loop) */
@@ -189,7 +189,7 @@ export class BridgeManager {
     // Build context suffix: project name + short session ID
     const contextParts: string[] = [];
     if (hook.tlive_cwd) {
-      const projectName = hook.tlive_cwd.split('/').pop() || '';
+      const projectName = basename(hook.tlive_cwd || '') || '';
       if (projectName) contextParts.push(projectName);
     }
     if (hook.tlive_session_id) {

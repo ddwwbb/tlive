@@ -1,6 +1,6 @@
 {
   "name": "tlive",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "Terminal live monitoring + IM bridge for AI coding tools",
   "type": "module",
   "bin": {
@@ -10,10 +10,14 @@
     "scripts/cli.js",
     "scripts/postinstall.js",
     "scripts/preuninstall.js",
+    "scripts/hook-handler.mjs",
+    "scripts/notify-handler.mjs",
+    "scripts/stop-handler.mjs",
     "scripts/hook-handler.sh",
     "scripts/notify-handler.sh",
     "scripts/stop-handler.sh",
     "scripts/daemon.sh",
+    "scripts/statusline.mjs",
     "scripts/statusline.sh",
     "scripts/doctor.sh",
     "scripts/install.sh",

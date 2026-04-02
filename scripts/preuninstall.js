@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // preuninstall: clean up installed binaries, scripts, and docs from ~/.tlive/
 // Preserves user data: config.env, data/, logs/, runtime/
-import { existsSync, unlinkSync, readdirSync, rmdirSync, readFileSync } from 'node:fs';
+import { existsSync, unlinkSync, readdirSync, rmdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { execSync } from 'node:child_process';
@@ -16,7 +16,7 @@ function stopBridge() {
   if (!existsSync(pidFile)) return;
   try {
     const pid = parseInt(readFileSync(pidFile, 'utf-8').trim(), 10);
-    process.kill(pid, 'SIGTERM');
+    process.kill(pid);
     unlinkSync(pidFile);
     console.log(`Stopped bridge daemon (PID ${pid})`);
   } catch {
@@ -29,7 +29,10 @@ function cleanBinDir() {
   const files = [
     'tlive-core', 'tlive-core.exe',
     '.core-version',
+    // Legacy .sh files (from versions <= 0.4.2)
     'hook-handler.sh', 'notify-handler.sh', 'stop-handler.sh',
+    // Legacy .mjs copies (from early 0.4.3 builds)
+    'hook-handler.mjs', 'notify-handler.mjs', 'stop-handler.mjs', 'statusline.mjs',
   ];
   let removed = 0;
   for (const f of files) {
@@ -76,8 +79,8 @@ function cleanHooks() {
       const entries = settings.hooks[hookType];
       if (!Array.isArray(entries)) continue;
       const filtered = entries.filter(e => {
-        if (e.hooks) return !e.hooks.some(h => /hook-handler\.sh|notify-handler\.sh|stop-handler\.sh/.test(h.command || ''));
-        return !/hook-handler\.sh|notify-handler\.sh|stop-handler\.sh/.test(e.command || '');
+        if (e.hooks) return !e.hooks.some(h => /hook-handler\.(sh|mjs)|notify-handler\.(sh|mjs)|stop-handler\.(sh|mjs)/.test(h.command || ''));
+        return !/hook-handler\.(sh|mjs)|notify-handler\.(sh|mjs)|stop-handler\.(sh|mjs)/.test(e.command || '');
       });
       if (filtered.length !== entries.length) {
         changed = true;
@@ -87,7 +90,6 @@ function cleanHooks() {
     }
 
     if (changed) {
-      const { writeFileSync } = await import('node:fs');
       writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
       console.log('Removed TLive hooks from Claude Code settings');
     }

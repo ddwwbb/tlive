@@ -114,85 +114,29 @@ Enter numbers (e.g., 1,3):"
 
 ### `stop`
 
-```bash
-PID_FILE=~/.tlive/runtime/bridge.pid
-if [ -f "$PID_FILE" ]; then
-  kill "$(cat "$PID_FILE")" 2>/dev/null
-  rm -f "$PID_FILE"
-  echo "Bridge stopped."
-else
-  echo "Bridge is not running."
-fi
+```
+tlive stop
 ```
 
 ### `status`
 
-```bash
-# Bridge
-source ~/.tlive/config.env 2>/dev/null
-if [ -f ~/.tlive/runtime/bridge.pid ] && kill -0 "$(cat ~/.tlive/runtime/bridge.pid)" 2>/dev/null; then
-  echo "Bridge: running (PID $(cat ~/.tlive/runtime/bridge.pid), runtime: ${TL_RUNTIME:-claude})"
-else
-  echo "Bridge: not running"
-fi
-
-# Go Core (optional)
-if curl -sf "http://localhost:${TL_PORT:-8080}/api/status" -H "Authorization: Bearer ${TL_TOKEN}" >/dev/null 2>&1; then
-  echo "Web terminal: available at http://localhost:${TL_PORT:-8080}"
-else
-  echo "Web terminal: not running (start with: tlive <cmd>)"
-fi
-
-# Hooks
-[ -f ~/.tlive/hooks-paused ] && echo "Hooks: ⏸ paused" || echo "Hooks: ▶ active"
+```
+tlive status
 ```
 
 ### `logs`
 
 Extract optional line count N from arguments (default 50).
-```bash
-tail -n ${N:-50} ~/.tlive/logs/bridge.log
+```
+tlive logs [N]
 ```
 
 ### `doctor`
 
 Run diagnostics and suggest fixes. For complex issues, read `~/.tlive/docs/troubleshooting.md`.
 
-```bash
-echo "=== TLive Doctor ==="
-
-# Node.js
-echo -n "Node.js: " && node -v 2>/dev/null || echo "NOT FOUND — install Node.js >= 22"
-
-# Claude CLI
-echo -n "Claude CLI: " && claude --version 2>/dev/null || echo "NOT FOUND — install Claude Code"
-
-# Config
-[ -f ~/.tlive/config.env ] && echo "Config: ✓" || echo "Config: ✗ — run /tlive setup"
-
-# Bridge build
-# Bridge build check handled by 'tlive start' — skip here
-
-# Bridge process
-if [ -f ~/.tlive/runtime/bridge.pid ] && kill -0 "$(cat ~/.tlive/runtime/bridge.pid)" 2>/dev/null; then
-  echo "Bridge: ✓ running (PID $(cat ~/.tlive/runtime/bridge.pid))"
-else
-  echo "Bridge: ✗ not running"
-fi
-
-# Go Core
-source ~/.tlive/config.env 2>/dev/null
-if curl -sf "http://localhost:${TL_PORT:-8080}/api/status" -H "Authorization: Bearer ${TL_TOKEN}" >/dev/null 2>&1; then
-  echo "Go Core: ✓ reachable"
-else
-  echo "Go Core: ○ not running (optional — needed for web terminal + hook approval)"
-fi
-
-# Hook scripts
-[ -f ~/.tlive/bin/hook-handler.sh ] && echo "Hook scripts: ✓" || echo "Hook scripts: ✗ — run: tlive install skills"
-
-# Hooks status
-[ -f ~/.tlive/hooks-paused ] && echo "Hooks: ⏸ paused" || echo "Hooks: ▶ active"
+```
+tlive doctor
 ```
 
 Then validate IM tokens if configured — read `~/.tlive/docs/token-validation.md` for commands.

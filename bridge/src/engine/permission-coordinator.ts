@@ -356,6 +356,58 @@ export class PermissionCoordinator {
     return true;
   }
 
+  /** Handle AskUserQuestion skip — resolve hook with allow + empty answers */
+  async resolveAskQuestionSkip(
+    hookId: string,
+    sessionId: string,
+    messageId: string,
+    adapter: { editMessage: (chatId: string, messageId: string, msg: any) => Promise<any>; send: (msg: any) => Promise<any> },
+    chatId: string,
+    coreAvailable: boolean,
+  ): Promise<boolean> {
+    if (this.resolvedHookIds.has(hookId)) return true;
+
+    if (!coreAvailable) {
+      await adapter.send({ chatId, text: '❌ Go Core not available' });
+      return true;
+    }
+    const questionData = this.hookQuestionData.get(hookId);
+    if (!questionData) {
+      await adapter.send({ chatId, text: '❌ Question data not found' });
+      return true;
+    }
+
+    this.resolvedHookIds.set(hookId, Date.now());
+    const q = questionData.questions[0];
+    const answers: Record<string, string> = { [q.question]: '' };
+    const updatedInput = { questions: questionData.questions, answers };
+
+    try {
+      await fetch(`${this.coreUrl}/api/hooks/permission/${hookId}/resolve`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ decision: 'allow', updated_input: updatedInput }),
+        signal: AbortSignal.timeout(5000),
+      });
+      this.hookQuestionData.delete(hookId);
+      await adapter.editMessage(chatId, messageId, {
+        chatId,
+        text: '⏭ Skipped',
+        buttons: [],
+        feishuHeader: { template: 'grey', title: '⏭ Skipped' },
+      });
+      if (sessionId) {
+        this.trackHookMessage(messageId, sessionId);
+      }
+    } catch (err) {
+      await adapter.send({ chatId, text: `❌ Failed to resolve: ${err}` });
+    }
+    return true;
+  }
+
   /** Handle AskUserQuestion free text reply — resolve hook with text as answer */
   async resolveAskQuestionWithText(
     hookId: string,

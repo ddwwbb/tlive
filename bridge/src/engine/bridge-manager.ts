@@ -508,6 +508,18 @@ export class BridgeManager {
         return true;
       }
 
+      // AskUserQuestion skip callback — resolve with allow + empty answers (askq_skip:{hookId}:{sessionId})
+      if (msg.callbackData.startsWith('askq_skip:')) {
+        const parts = msg.callbackData.split(':');
+        const hookId = parts[1];
+        const sessionId = parts[2] || '';
+        await this.permissions.resolveAskQuestionSkip(
+          hookId, sessionId,
+          msg.messageId, adapter, msg.chatId, this.coreAvailable,
+        );
+        return true;
+      }
+
       // Hook permission callbacks (hook:allow:ID:sessionId, hook:allow_always:ID:sessionId, hook:deny:ID:sessionId)
       if (msg.callbackData.startsWith('hook:')) {
         const parts = msg.callbackData.split(':');
@@ -568,17 +580,23 @@ export class BridgeManager {
         }
       }
 
-      // SDK AskUserQuestion skip (perm:deny:askq-*) — resolve + edit card
-      if (msg.callbackData.startsWith('perm:deny:askq-')) {
-        const permId = msg.callbackData.split(':').slice(2).join(':');
-        this.permissions.getGateway().resolve(permId, 'deny');
-        this.sdkQuestionData.delete(permId);
-        adapter.editMessage(msg.chatId, msg.messageId, {
-          chatId: msg.chatId,
-          text: '❌ Skipped',
-          feishuHeader: { template: 'red', title: '❌ Skipped' },
-        }).catch(() => {});
-        return true;
+      // SDK AskUserQuestion skip (perm:allow:permId:askq_skip) — resolve with allow + empty answers
+      if (msg.callbackData.includes(':askq_skip')) {
+        const parts = msg.callbackData.split(':');
+        const skipIdx = parts.indexOf('askq_skip');
+        if (skipIdx >= 0) {
+          const permId = parts.slice(2, skipIdx).join(':');
+          // Mark as skip so sdkAskQuestionHandler returns empty answers
+          this.sdkQuestionTextAnswers.set(permId, '');
+          this.permissions.getGateway().resolve(permId, 'allow');
+          adapter.editMessage(msg.chatId, msg.messageId, {
+            chatId: msg.chatId,
+            text: '⏭ Skipped',
+            buttons: [],
+            feishuHeader: { template: 'grey', title: '⏭ Skipped' },
+          }).catch(() => {});
+          return true;
+        }
       }
 
       // Regular permission broker callbacks (perm:allow:ID, perm:deny:ID)
@@ -821,7 +839,7 @@ export class BridgeManager {
       }));
       buttons.push({
         label: '❌ Skip',
-        callbackData: `perm:deny:${permId}`,
+        callbackData: `perm:allow:${permId}:askq_skip`,
         style: 'danger' as const,
       });
 
@@ -860,7 +878,14 @@ export class BridgeManager {
 
       if (result.behavior === 'deny') {
         this.sdkQuestionData.delete(permId);
-        throw new Error('User skipped the question');
+        // Return empty answers instead of throwing — Claude handles gracefully
+        adapter.editMessage(msg.chatId, sendResult.messageId, {
+          chatId: msg.chatId,
+          text: '⏭ Skipped',
+          buttons: [],
+          feishuHeader: msg.channelType === 'feishu' ? { template: 'grey', title: '⏭ Skipped' } : undefined,
+        }).catch(() => {});
+        return { [q.question]: '' };
       }
 
       // Check for free text answer first, then option index

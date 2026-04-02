@@ -278,7 +278,7 @@ async function main() {
             }));
             buttons.push({
               label: '❌ Skip',
-              callbackData: `hook:deny:${perm.id}:${sid}`,
+              callbackData: `askq_skip:${perm.id}:${sid}`,
               style: 'danger' as const,
             });
 

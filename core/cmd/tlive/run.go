@@ -111,10 +111,14 @@ func runHost(cfg *config.Config, args []string, rows, cols uint16, lockPath stri
 	log.Printf("session created: id=%s cmd=%s args=%v pid=%d", ms.Session.ID, ms.Session.Command, args[1:], ms.Session.Pid)
 	defer mgr.StopSession(ms.Session.ID)
 
-	// Register local output client IMMEDIATELY after session creation to
-	// minimize the window where initial PTY output could be missed.
+	// On non-Windows, register local output client IMMEDIATELY after session
+	// creation to minimize the window where initial PTY output could be missed.
+	// On Windows, defer registration until after the QR code is shown, because
+	// ConPTY output to stdout overwrites the shared console buffer.
 	localClient := &localOutputClient{writer: os.Stdout}
-	ms.Hub.Register(localClient)
+	if runtime.GOOS != "windows" {
+		ms.Hub.Register(localClient)
+	}
 	defer ms.Hub.Unregister(localClient)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -146,12 +150,14 @@ func runHost(cfg *config.Config, args []string, rows, cols uint16, lockPath stri
 	fmt.Fprintf(os.Stderr, "    Local:   %s\n", localURL)
 	fmt.Fprintf(os.Stderr, "    Network: %s\n", url)
 	fmt.Fprintf(os.Stderr, "  Session: %s (ID: %s)\n\n", ms.Session.Command, ms.Session.ID)
-	if runtime.GOOS == "windows" {
-		qrterminal.Generate(url, qrterminal.L, os.Stderr)
-	} else {
-		qrterminal.GenerateHalfBlock(url, qrterminal.L, os.Stderr)
-	}
+	qrterminal.GenerateHalfBlock(url, qrterminal.L, os.Stderr)
 	fmt.Fprintln(os.Stderr)
+
+	// On Windows, register the local output client now (after QR is shown)
+	// and replay any buffered output the child produced while we were printing.
+	if runtime.GOOS == "windows" {
+		ms.Hub.Register(localClient)
+	}
 
 	// Set terminal to raw mode for proper input pass-through
 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
@@ -217,8 +223,10 @@ func runHost(cfg *config.Config, args []string, rows, cols uint16, lockPath stri
 	var exitCode int
 	select {
 	case exitCode = <-doneCh:
+		ms.Hub.Unregister(localClient)
 		fmt.Fprintf(os.Stderr, "\n  Process exited with code %d\n", exitCode)
 	case sig := <-sigCh:
+		ms.Hub.Unregister(localClient)
 		fmt.Fprintf(os.Stderr, "\n  Received signal: %v\n", sig)
 		ms.Proc.Kill()
 		exitCode = 130
@@ -271,11 +279,7 @@ func runClient(lock daemon.LockInfo, args []string, rows, cols uint16) error {
 	fmt.Fprintf(os.Stderr, "    Local:   %s\n", localURL)
 	fmt.Fprintf(os.Stderr, "    Network: %s\n", url)
 	fmt.Fprintf(os.Stderr, "  Session: %s (ID: %s)\n\n", args[0], sessionID)
-	if runtime.GOOS == "windows" {
-		qrterminal.Generate(url, qrterminal.L, os.Stderr)
-	} else {
-		qrterminal.GenerateHalfBlock(url, qrterminal.L, os.Stderr)
-	}
+	qrterminal.GenerateHalfBlock(url, qrterminal.L, os.Stderr)
 	fmt.Fprintln(os.Stderr)
 
 	// Set terminal to raw mode

@@ -4,8 +4,8 @@
  */
 
 import { execSync } from 'node:child_process';
-import { writeFileSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, writeFileSync, mkdirSync } from 'node:fs';
+import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { PermissionResult } from '@anthropic-ai/claude-agent-sdk';
@@ -52,7 +52,19 @@ function findClaudeCli(): string | undefined {
   try {
     const result = execSync(cmd, { encoding: 'utf-8', timeout: 5000 }).trim();
     // `where` on Windows may return multiple lines; take the first
-    return result.split('\n')[0]?.trim() || undefined;
+    const found = result.split('\n')[0]?.trim();
+    if (!found) return undefined;
+
+    // On Windows, npm-installed Claude Code exposes a cmd/ps1 wrapper (no
+    // extension) that isn't a native binary. The SDK's query() tries to
+    // spawn it directly and gets ENOENT. Resolve to the actual cli.js
+    // inside the package so the SDK uses `node cli.js` instead.
+    if (process.platform === 'win32') {
+      const cliJs = join(dirname(found), 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js');
+      if (existsSync(cliJs)) return cliJs;
+    }
+
+    return found;
   } catch {
     return undefined;
   }
@@ -60,7 +72,10 @@ function findClaudeCli(): string | undefined {
 
 function checkCliVersion(cliPath: string): { ok: boolean; version?: string; error?: string } {
   try {
-    const version = execSync(`"${cliPath}" --version`, { encoding: 'utf-8', timeout: 10000 }).trim();
+    // On Windows, .js files are associated with Windows Script Host, not Node.
+    // Prefix with "node" to avoid triggering wscript.exe.
+    const cmd = cliPath.endsWith('.js') ? `node "${cliPath}" --version` : `"${cliPath}" --version`;
+    const version = execSync(cmd, { encoding: 'utf-8', timeout: 10000 }).trim();
     const match = version.match(/(\d+)\.\d+/);
     if (!match || parseInt(match[1]) < 2) {
       return { ok: false, version, error: `Claude CLI ${version} too old (need >= 2.x)` };
